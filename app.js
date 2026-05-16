@@ -70,7 +70,9 @@ let S = {
   sortDir:  'asc',
   calYear:  null,
   calMonth: null,
+  currentEmpId: null,
 };
+let _internalNav = false; // guard against hashchange loop
 
 // ═══════════════════ LOCALSTORAGE ════════════════
 
@@ -551,13 +553,23 @@ async function captureAndSave(elementId, filename, caption='') {
   if (!node) { toast('Нечего сохранять', 'warning'); return; }
   toast('⏳ Генерация изображения…');
   try {
-    const canvas = await html2canvas(node, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
-    if (caption) {
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#0f172a';
-      ctx.font = 'bold 24px sans-serif';
-      ctx.fillText(caption, 20, 30);
-    }
+    // Force load all scroll content
+    const oldOverflow = node.style.overflow;
+    node.style.overflow = 'visible';
+    qsa('.tl-scroll, .brk-scroll-wrap', node).forEach(s => { s.dataset._prevOv = s.style.overflow; s.style.overflow = 'visible'; });
+
+    const canvas = await html2canvas(node, {
+      scale: 2,
+      backgroundColor: '#ffffff',
+      useCORS: true,
+      logging: false,
+      windowWidth: Math.max(node.scrollWidth, 1920),
+    });
+
+    // Restore
+    node.style.overflow = oldOverflow;
+    qsa('.tl-scroll, .brk-scroll-wrap', node).forEach(s => { s.style.overflow = s.dataset._prevOv || ''; });
+
     const a = document.createElement('a');
     a.download = filename;
     a.href = canvas.toDataURL('image/png');
@@ -572,10 +584,55 @@ async function captureAndPDF(elementId, filename) {
   if (!node) return;
   toast('⏳ Генерация PDF…');
   try {
-    const canvas = await html2canvas(node, { scale: 1.5, backgroundColor: '#ffffff' });
+    const oldOverflow = node.style.overflow;
+    node.style.overflow = 'visible';
+    qsa('.tl-scroll, .brk-scroll-wrap', node).forEach(s => { s.dataset._prevOv = s.style.overflow; s.style.overflow = 'visible'; });
+
+    const canvas = await html2canvas(node, { scale: 2, backgroundColor: '#ffffff', windowWidth: Math.max(node.scrollWidth, 1920), logging:false });
+
+    node.style.overflow = oldOverflow;
+    qsa('.tl-scroll, .brk-scroll-wrap', node).forEach(s => { s.style.overflow = s.dataset._prevOv || ''; });
+
     const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [canvas.width, canvas.height] });
-    pdf.addImage(canvas.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, canvas.width, canvas.height);
+    // Multi-page A4 landscape PDF
+    const pdf = new jsPDF({ orientation:'landscape', unit:'mm', format:'a4' });
+    const pageW = 297;  // A4 landscape width in mm
+    const pageH = 210;
+    const margin = 5;
+    const usableW = pageW - 2*margin;
+    const usableH = pageH - 2*margin - 8; // 8mm for header
+
+    // Scale image to fit page width
+    const imgW = usableW;
+    const imgH = canvas.height * imgW / canvas.width;
+
+    let yOffset = 0;
+    let pageNum = 1;
+    const totalPages = Math.ceil(imgH / usableH);
+
+    while (yOffset < imgH) {
+      if (pageNum > 1) pdf.addPage();
+      pdf.setFontSize(9);
+      pdf.setTextColor(100);
+      pdf.text(`KAORZIP · ${formatDisp(S.date)} · стр. ${pageNum}/${totalPages}`, margin, margin+4);
+
+      // Calculate slice from source canvas
+      const sliceCanvas = document.createElement('canvas');
+      const srcH = Math.min((usableH/imgH) * canvas.height, canvas.height - (yOffset/imgH)*canvas.height);
+      sliceCanvas.width = canvas.width;
+      sliceCanvas.height = srcH;
+      const ctx = sliceCanvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0,0,canvas.width,srcH);
+      ctx.drawImage(canvas, 0, (yOffset/imgH)*canvas.height, canvas.width, srcH, 0, 0, canvas.width, srcH);
+
+      const sliceImgH = srcH * imgW / canvas.width;
+      pdf.addImage(sliceCanvas.toDataURL('image/jpeg', 0.88), 'JPEG', margin, margin+8, imgW, sliceImgH);
+
+      yOffset += usableH;
+      pageNum++;
+    }
+
     pdf.save(filename);
     toast('✅ PDF сохранён', 'success');
   } catch(e) { toast('❌ Ошибка PDF: ' + e.message, 'error'); }
@@ -632,21 +689,30 @@ function navigate(page, params={}) {
   qsa('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page===page));
   S.page = page;
   el('breadcrumb').textContent = PAGE_LABELS[page]||page;
+
+  // Cache employee id for profile page so hashchange doesn't lose it
+  if (page === 'employee' && params.id) S.currentEmpId = params.id;
+
   const renders = { dashboard:renderDashboard, timeline:renderTimeline, breaks:renderBreaksPage,
     calendar:renderCalendar, employees:renderEmployees, favorites:renderFavorites,
     import:renderImport, export:renderExport };
   if (renders[page]) renders[page]();
-  else if (page==='employee') renderProfile(params.id);
+  else if (page==='employee') renderProfile(params.id || S.currentEmpId);
+
+  _internalNav = true;
   window.location.hash = page;
+  setTimeout(() => { _internalNav = false; }, 80);
 }
 
 function handleHash() {
+  if (_internalNav) return;
   const uParam = new URLSearchParams(window.location.search).get('user');
   if (uParam && S.data.length) {
     const emp = S.data.find(e => e.name.toLowerCase().includes(uParam.toLowerCase()));
     if (emp) { navigate('employee', { id: emp.name }); return; }
   }
   const h = window.location.hash.slice(1);
+  if (h === 'employee' && S.currentEmpId) { navigate('employee', { id: S.currentEmpId }); return; }
   navigate(PAGE_LABELS[h] ? h : 'dashboard');
 }
 
@@ -738,15 +804,17 @@ function renderDashboard() {
     else counts.off++;
   });
   const active = counts.work + counts.night + counts.changed;
+  const onBreak = getCurrentlyOnBreak();
+  const isLive  = isToday(S.date);
 
   const cards = [
     { icon:'👥', label:'Всего в системе', v: display.length, color:'#3b82f6', meta:'' },
     { icon:'✅', label:'Работают',         v: active,         color:'#10b981', meta:`из ${display.length}` },
+    ...(isLive ? [{ icon:'☕', label:'Сейчас на перерыве', v: onBreak.length, color:'#f59e0b', meta:'в реальном времени' }] : []),
     { icon:'🌙', label:'Ночная смена',     v: counts.night,   color:'#8b5cf6', meta:'' },
     { icon:'🔄', label:'Изм. смены',       v: counts.changed, color:'#10b981', meta:'' },
     { icon:'🏖️', label:'Отпуск',           v: counts.vac,     color:'#64748b', meta:'' },
     { icon:'🤒', label:'Больничный',       v: counts.sick,    color:'#ef4444', meta:'' },
-    { icon:'📚', label:'Уч. отпуск',       v: counts.study,   color:'#06b6d4', meta:'' },
     { icon:'⚠️', label:'Неявка',           v: counts.absence, color:'#dc2626', meta:'' },
   ];
 
@@ -759,44 +827,68 @@ function renderDashboard() {
     </div>`).join('')
   }</div>`;
 
-  // Working list
-  const working = display.filter(e => {
-    const st=(e.schedule[dk]||{}).status||'off';
-    return st==='work'||st==='21'||st==='9';
-  });
-  const notWorking = display.filter(e => {
-    const st=(e.schedule[dk]||{}).status||'off';
-    return st!=='work'&&st!=='21'&&st!=='9'&&st!=='off';
-  });
+  // Currently on break — live widget
+  const onBreakHTML = isLive ? `
+    <div class="card">
+      <div class="card-hdr">
+        <span class="card-title">☕ Сейчас на перерыве (${onBreak.length})</span>
+        <span class="txt-muted txt-sm">обновляется автоматически</span>
+      </div>
+      <div class="card-body">
+        ${onBreak.length ? `<div class="onbreak-list">${onBreak.map(b => {
+          const emp = S.data.find(e => e.name.startsWith(b.name.substring(0,12)) || b.name.startsWith(e.name.substring(0,12)));
+          const col = emp?.color||'#f59e0b';
+          const typeCol = BREAK_COLORS[b.type]||'#f59e0b';
+          return `<div class="onbreak-row" onclick="navigate('employee',{id:'${(emp?.name||b.name).replace(/'/g,"\\'")}'})">
+            ${avatarHTML(b.name, col, 32)}
+            <div class="onbreak-info">
+              <div class="onbreak-name">${b.name.split(' ').slice(0,2).join(' ')}</div>
+              <div class="onbreak-meta">СВ: ${(b.sv||'').split(' ')[0]} · ${b.start}–${b.end}</div>
+            </div>
+            <span class="badge" style="background:${typeCol}22;color:${typeCol};">${b.type}</span>
+            <span class="onbreak-left">осталось ${b.remaining} мин</span>
+          </div>`;
+        }).join('')}</div>` : '<div class="txt-muted" style="padding:12px 0;">Никто не на перерыве</div>'}
+      </div>
+    </div>
+  ` : '';
+
+  // Working / not working lists
+  const working    = display.filter(e => { const st=(e.schedule[dk]||{}).status; return st==='work'||st==='21'||st==='9'; });
+  const notWorking = display.filter(e => { const st=(e.schedule[dk]||{}).status; return st&&st!=='work'&&st!=='21'&&st!=='9'&&st!=='off'; });
 
   function empRow(e) {
     const sc = e.schedule[dk]||{status:'off'};
-    return `<div class="emp-row" onclick="navigate('employee',{id:'${e.name}'})">
-      ${avatarHTML(e.name, e.color||'#3b82f6', 36)}
+    const t  = sc.shiftStart ? `<span class="txt-sm txt-muted" style="margin-left:auto;margin-right:8px;">${sc.shiftStart}–${sc.shiftEnd}</span>` : '';
+    const safeName = e.name.replace(/'/g,"\\'");
+    return `<div class="emp-row" onclick="navigate('employee',{id:'${safeName}'})">
+      ${avatarHTML(e.name, e.color||'#3b82f6', 34)}
       <div class="emp-info">
         <div class="emp-name">${e.name}</div>
-        <div class="emp-meta">${e.rg||''} · СВ: ${(e.sv||'').split(' ')[0]}</div>
+        <div class="emp-meta">СВ: <b>${e.sv||'—'}</b> · ${e.rg||''}</div>
       </div>
+      ${t}
       ${badge(sc.status)}
     </div>`;
   }
 
-  // RG analytics
+  // RG analytics — full names, no truncation, sortable
   const rgStats = rgs.map(rg => {
     const g = S.data.filter(e=>e.rg===rg);
-    const w = g.filter(e=>{ const st=(e.schedule[dk]||{}).status||'off'; return st==='work'||st==='21'||st==='9'; }).length;
+    const w = g.filter(e=>{ const st=(e.schedule[dk]||{}).status; return st==='work'||st==='21'||st==='9'; }).length;
     return { rg, total:g.length, working:w };
-  });
+  }).sort((a,b)=>b.total-a.total);
 
   setHTML('dashContent', `
     ${statsHTML}
+    ${onBreakHTML}
     <div class="dash-grid">
       <div class="dash-col">
         <div class="card">
           <div class="card-hdr"><span class="card-title">✅ Работают (${working.length})</span></div>
           <div class="card-body">
-            ${working.length ? working.slice(0,10).map(empRow).join('') : '<div class="txt-muted" style="padding:12px 0;">Все сотрудники отдыхают</div>'}
-            ${working.length>10?`<div class="txt-muted txt-sm" style="padding:8px 0;">… ещё ${working.length-10}</div>`:''}
+            ${working.length ? working.slice(0,12).map(empRow).join('') : '<div class="txt-muted" style="padding:12px 0;">Никто не работает</div>'}
+            ${working.length>12?`<div class="txt-muted txt-sm" style="padding:8px 0;text-align:center;"><a href="#timeline" onclick="navigate('timeline');return false;" style="color:var(--primary);">Смотреть всех в Timeline →</a></div>`:''}
           </div>
         </div>
       </div>
@@ -806,12 +898,12 @@ function renderDashboard() {
           <div class="card-body">${notWorking.slice(0,8).map(empRow).join('')}</div>
         </div>` : ''}
         <div class="card">
-          <div class="card-hdr"><span class="card-title">📊 По группам</span></div>
+          <div class="card-hdr"><span class="card-title">📊 По группам (РГ)</span></div>
           <div class="card-body">
             <div class="mini-bars">${rgStats.map(({rg,total,working:w})=>{
               const pct = total ? Math.round(w/total*100) : 0;
               return `<div class="mini-bar-row">
-                <span class="mini-bar-label" title="${rg}">${rg}</span>
+                <span class="mini-bar-label-full" title="${rg}">${rg}</span>
                 <div class="mini-bar-track"><div class="mini-bar-fill" style="width:${pct}%;"></div></div>
                 <span class="mini-bar-num">${w}/${total}</span>
               </div>`;
@@ -876,12 +968,12 @@ function renderTimeline() {
           const bw = tDurPx(b.start, b.end);
           if (bx < 0) return;
           const col = BREAK_COLORS[b.type]||'#f59e0b';
-          const icon = b.type==='обед'?'🍽':b.type==='ужин'?'🌙':'☕';
-          html += `<div class="tl-block tl-b-break" style="left:${bx}px;width:${Math.max(bw,6)}px;background:${col};" data-tip="${b.type}|${b.start}–${b.end}">${bw>30?icon:''}</div>`;
+          const bLabel = bw > 50 ? b.start : '';
+          html += `<div class="tl-block tl-b-break" style="left:${bx}px;width:${Math.max(bw,6)}px;background:${col};" data-tip="${b.type}|${b.start}–${b.end}">${bLabel}</div>`;
         });
       } else if (sc.lunchHour) {
         const lx = tStrToX(`${pad(sc.lunchHour)}:00`);
-        html += `<div class="tl-block tl-b-break" style="left:${lx}px;width:${60*TL_PX_MIN}px;background:#f97316;" data-tip="Обед|${pad(sc.lunchHour)}:00–${pad(sc.lunchHour+1)}:00">🍽</div>`;
+        html += `<div class="tl-block tl-b-break" style="left:${lx}px;width:${60*TL_PX_MIN}px;background:#f97316;" data-tip="Обед|${pad(sc.lunchHour)}:00–${pad(sc.lunchHour+1)}:00">${pad(sc.lunchHour)}:00</div>`;
       }
     } else if (isLeave) {
       const TL_W = (TL_END-TL_START)*TL_PX_MIN;
@@ -914,12 +1006,13 @@ function renderTimeline() {
           const sc  = getScheduleOn(e);
           const brk = getBreaksFor(e.name);
           const ini = e.name.split(' ').slice(0,2).map(w=>w[0]).join('');
+          const safeName = e.name.replace(/'/g,"\\'");
           return `<div class="tl-row">
-            <div class="tl-emp-cell" onclick="navigate('employee',{id:'${e.name}'})">
+            <div class="tl-emp-cell" onclick="navigate('employee',{id:'${safeName}'})">
               <div class="tl-emp-ava" style="background:${e.color}22;color:${e.color};">${ini}</div>
               <div>
                 <div class="tl-emp-name">${e.name.split(' ').slice(0,2).join(' ')}</div>
-                <div class="tl-emp-meta">${e.graphSurv||''}</div>
+                <div class="tl-emp-meta">СВ: ${(e.sv||'').split(' ')[0]} · ${e.graphSurv||''}</div>
               </div>
             </div>
             <div class="tl-blocks-wrap" style="width:${TL_W}px;">
@@ -994,19 +1087,17 @@ function renderBreaksPage() {
   }
 
   const rgs = getUniqueVals(S.data,'rg');
-  const svs = getUniqueVals(S.data,'sv');
+  const svs = [...new Set([...getUniqueVals(S.data,'sv'), ...S.breaks.map(b=>b.sv).filter(Boolean)])].sort();
   populateSelect('brkRGFilter', rgs);
   populateSelect('brkSVFilter', svs);
 
   const rgF = (el('brkRGFilter')||{}).value||'';
   const svF = (el('brkSVFilter')||{}).value||'';
 
-  // Build display list: prefer breaks file data, supplement with schedule data
+  // Build display list
   const display = [];
-
   if (S.breaks.length) {
     let brkList = [...S.breaks];
-    // Filter by sv if needed
     if (svF) brkList = brkList.filter(b => b.sv === svF);
     if (rgF) {
       const rgEmps = S.data.filter(e=>e.rg===rgF).map(e=>e.name);
@@ -1014,36 +1105,63 @@ function renderBreaksPage() {
     }
     brkList.forEach(b => display.push(b));
   } else {
-    // Fallback: show schedule breaks
     let emps = filterEmps({ rg:rgF, sv:svF });
-    emps = emps.filter(e => {
-      const sc = getScheduleOn(e);
-      return (sc.status==='work'||sc.status==='9') && sc.lunchHour;
-    });
+    emps = emps.filter(e => { const sc = getScheduleOn(e); return (sc.status==='work'||sc.status==='9') && sc.lunchHour; });
     emps.forEach(e => {
       const sc = getScheduleOn(e);
-      display.push({
-        name: e.name,
-        shift: `${sc.shiftStart}–${sc.shiftEnd}`,
-        sv: e.sv,
-        breaks: sc.lunchHour ? [{ start:`${pad(sc.lunchHour)}:00`, end:`${pad(sc.lunchHour+1)}:00`, type:'обед' }] : [],
-      });
+      display.push({ name:e.name, shift:`${sc.shiftStart}–${sc.shiftEnd}`, sv:e.sv,
+        breaks: sc.lunchHour ? [{start:`${pad(sc.lunchHour)}:00`,end:`${pad(sc.lunchHour+1)}:00`,type:'обед'}] : [] });
     });
   }
+
+  // ── LIVE: who is on break now
+  const onBreak = getCurrentlyOnBreak();
+  const returningSoon = getReturningSoon();
+  const isLive = isToday(S.date);
+
+  const onBreakWidget = isLive ? `
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-hdr">
+        <span class="card-title">☕ Сейчас на перерыве: <b style="color:var(--primary);">${onBreak.length}</b></span>
+        <span class="txt-muted txt-sm">Время: ${pad(new Date().getHours())}:${pad(new Date().getMinutes())} · обновляется</span>
+      </div>
+      <div class="card-body">
+        ${onBreak.length ? `
+          <div class="onbreak-list">${onBreak.map(b => {
+            const emp = S.data.find(e => e.name.startsWith(b.name.substring(0,12)) || b.name.startsWith(e.name.substring(0,12)));
+            const col = emp?.color||'#f59e0b';
+            const typeCol = BREAK_COLORS[b.type]||'#f59e0b';
+            const safe = (emp?.name||b.name).replace(/'/g,"\\'");
+            return `<div class="onbreak-row" onclick="navigate('employee',{id:'${safe}'})">
+              ${avatarHTML(b.name, col, 32)}
+              <div class="onbreak-info">
+                <div class="onbreak-name">${b.name.split(' ').slice(0,2).join(' ')}</div>
+                <div class="onbreak-meta">СВ: ${(b.sv||'').split(' ')[0]} · ${b.start}–${b.end}</div>
+              </div>
+              <span class="badge" style="background:${typeCol}22;color:${typeCol};">${b.type}</span>
+              <span class="onbreak-left">${b.remaining} мин</span>
+            </div>`;
+          }).join('')}</div>
+        ` : '<div class="txt-muted" style="padding:10px 0;">Сейчас никого нет на перерыве</div>'}
+        ${returningSoon.length ? `
+          <div class="divider"></div>
+          <div class="txt-sm txt-muted" style="margin-bottom:6px;font-weight:600;">⏱ Скоро уйдут на перерыв (≤10 мин):</div>
+          <div class="returning-list">${returningSoon.map(b => `<span class="returning-chip">${b.name.split(' ').slice(0,2).join(' ')} <small>(${b.type} в ${b.start})</small></span>`).join('')}</div>
+        ` : ''}
+      </div>
+    </div>
+  ` : '';
 
   const TL_W  = (TL_END - TL_START) * TL_PX_MIN;
   const hours = [];
   for (let h=8;h<=22;h++) hours.push(h);
   const axisHTML = hours.map(h=>`<span class="brk-time-tick" style="left:${(h*60-TL_START)*TL_PX_MIN}px;">${pad(h)}:00</span>`).join('');
-
-  const isToday_= sameDay(S.date, new Date());
   const nx = nowX();
 
   const rowsHTML = display.map(b => {
     const emp = S.data.find(e=>e.name.startsWith(b.name.substring(0,12))||b.name.startsWith(e.name.substring(0,12)));
     const col  = emp ? emp.color : '#3b82f6';
 
-    // shift bar background
     let shiftBarHTML = '';
     if (b.shift && b.shift.includes('–')) {
       const [sh,se] = b.shift.split('–');
@@ -1056,34 +1174,38 @@ function renderBreaksPage() {
       const bx = tStrToX(br.start);
       const bw = tDurPx(br.start, br.end);
       const bc = BREAK_COLORS[br.type]||'#f59e0b';
-      return `<div class="brk-seg" style="left:${bx}px;width:${Math.max(bw,6)}px;background:${bc};" title="${br.type}: ${br.start}–${br.end}" onclick="showBreakEdit('${b.name}','${br.start}','${br.end}','${br.type}')"></div>`;
+      const safe = b.name.replace(/'/g,"\\'");
+      return `<div class="brk-seg" style="left:${bx}px;width:${Math.max(bw,8)}px;background:${bc};" title="${br.type}: ${br.start}–${br.end} · кликни для редактирования" onclick="showBreakEdit('${safe}','${br.start}','${br.end}','${br.type}')"><span class="brk-seg-lbl">${bw>40?br.start:''}</span></div>`;
     }).join('');
 
+    const safeNav = (emp?.name||b.name).replace(/'/g,"\\'");
+
     return `<div class="brk-row">
-      <div class="brk-emp-info">
+      <div class="brk-emp-info" onclick="navigate('employee',{id:'${safeNav}'})" style="cursor:pointer;">
         <div class="brk-emp-name">${b.name.split(' ').slice(0,2).join(' ')}</div>
-        <div class="brk-emp-sv">${b.sv||''}</div>
+        <div class="brk-emp-sv">СВ: ${(b.sv||'').split(' ')[0]}</div>
         <div class="brk-emp-shift txt-sm txt-muted">${b.shift||''}</div>
       </div>
       <div class="brk-track" style="width:${TL_W}px;">
         ${shiftBarHTML}
         ${breakSegs}
-        ${isToday_&&nx>=0?`<div class="tl-now-line" style="left:${nx}px;height:100%;"></div>`:''}
+        ${isLive&&nx>=0?`<div class="tl-now-line" style="left:${nx}px;height:100%;"></div>`:''}
       </div>
     </div>`;
   }).join('');
 
   setHTML('breaksContent', `
+    ${onBreakWidget}
     <div class="card" id="breaksCard">
       <div class="card-hdr">
-        <span class="card-title">График перерывов — ${display.length} сотрудников</span>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          ${Object.entries(BREAK_COLORS).map(([t,c])=>`<span style="display:flex;align-items:center;gap:4px;font-size:.78rem;"><span style="width:12px;height:12px;border-radius:3px;background:${c};display:inline-block;"></span>${t}</span>`).join('')}
+        <span class="card-title">📋 Расписание перерывов — ${display.length} сотрудников</span>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+          ${Object.entries(BREAK_COLORS).map(([t,c])=>`<span style="display:flex;align-items:center;gap:5px;font-size:.78rem;"><span style="width:12px;height:12px;border-radius:3px;background:${c};"></span>${t}</span>`).join('')}
         </div>
       </div>
-      <div class="card-body" style="overflow-x:auto;">
+      <div class="card-body brk-scroll-wrap">
         <div style="min-width:${TL_W+220}px;">
-          <div style="display:flex;margin-bottom:4px;">
+          <div style="display:flex;margin-bottom:6px;">
             <div style="width:220px;min-width:220px;"></div>
             <div style="position:relative;height:20px;flex:1;">${axisHTML}</div>
           </div>
@@ -1284,12 +1406,13 @@ function applyEmpFilters() {
         <tbody>${data.map(e=>{
           const sc=e.schedule[dk]||{status:'off'};
           const fav=S.favorites.includes(e.name);
-          return `<tr onclick="navigate('employee',{id:'${e.name}'})">
+          const safe = e.name.replace(/'/g,"\\'");
+          return `<tr onclick="navigate('employee',{id:'${safe}'})">
             <td><div style="display:flex;align-items:center;gap:8px;">${avatarHTML(e.name,e.color,28)}<span style="font-weight:600;">${e.name}</span></div></td>
-            <td>${e.rg||'—'}</td><td>${e.sv||'—'}</td><td><span class="chip">${e.graphSurv||'—'}</span></td>
+            <td>${e.rg||'—'}</td><td><b>${e.sv||'—'}</b></td><td><span class="chip">${e.graphSurv||'—'}</span></td>
             <td>${badge(sc.status)}</td>
             <td>${sc.shiftStart?`${sc.shiftStart}–${sc.shiftEnd}`:'—'}</td>
-            <td><span class="fav-star" style="color:${fav?'#f59e0b':'var(--border-color)'};" onclick="event.stopPropagation();toggleFav('${e.name}')">★</span></td>
+            <td><span class="fav-star" style="color:${fav?'#f59e0b':'var(--border-color)'};" onclick="event.stopPropagation();toggleFav('${safe}')">★</span></td>
           </tr>`;
         }).join('')||`<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--txt-muted);">Ничего не найдено</td></tr>`}</tbody>
       </table>
@@ -1321,15 +1444,16 @@ function renderFavorites() {
   const dk=dateKey(S.date);
   setHTML('favContent',`<div class="stats-grid">${favs.map(e=>{
     const sc=e.schedule[dk]||{status:'off'};
-    return `<div class="card" style="cursor:pointer;" onclick="navigate('employee',{id:'${e.name}'})">
+    const safe = e.name.replace(/'/g,"\\'");
+    return `<div class="card" style="cursor:pointer;" onclick="navigate('employee',{id:'${safe}'})">
       <div class="card-body" style="display:flex;align-items:center;gap:12px;">
         ${avatarHTML(e.name,e.color,44)}
         <div style="flex:1;min-width:0;">
           <div style="font-weight:700;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${e.name}</div>
-          <div class="txt-muted txt-sm">${e.rg||''}</div>
+          <div class="txt-muted txt-sm">СВ: ${e.sv||'—'}</div>
           <div style="margin-top:4px;">${badge(sc.status)}</div>
         </div>
-        <span class="fav-star" style="color:#f59e0b;" onclick="event.stopPropagation();toggleFav('${e.name}')">★</span>
+        <span class="fav-star" style="color:#f59e0b;" onclick="event.stopPropagation();toggleFav('${safe}')">★</span>
       </div>
     </div>`;
   }).join('')}</div>`);
@@ -1356,7 +1480,8 @@ function renderProfile(empName) {
     const dsc=emp.schedule[dateKey(d)]||{status:'off'};
     const isT=isToday(d);
     const col=STATUS_COLOR[dsc.status]||'#94a3b8';
-    return `<div class="profile-day${isT?' profile-day-today':''}" onclick="S.date=new Date(${d.getTime()});updateDateDisplay();renderProfile('${emp.name}')">
+    const safe = emp.name.replace(/'/g,"\\'");
+    return `<div class="profile-day${isT?' profile-day-today':''}" onclick="S.date=new Date(${d.getTime()});updateDateDisplay();renderProfile('${safe}')">
       <div class="profile-day-name">${DAYS_RU[d.getDay()]}</div>
       <div class="profile-day-num">${d.getDate()}</div>
       <div class="profile-day-status" style="color:${col};">${STATUS_LABEL[dsc.status]||'—'}</div>
@@ -1389,19 +1514,20 @@ function renderProfile(empName) {
     else mSt.off++;
   });
 
+  const safeName = emp.name.replace(/'/g,"\\'");
   setHTML('profileContent',`
     <div>
-      <button class="btn btn-ghost" onclick="history.back()" style="margin-bottom:16px;">← Назад</button>
+      <button class="btn btn-ghost" onclick="history.back()" style="margin-bottom:14px;">← Назад</button>
       <div class="profile-hdr">
         ${avatarHTML(emp.name, emp.color, 64)}
-        <div>
+        <div style="flex:1;">
           <div class="profile-name">${emp.name}</div>
-          <div class="txt-muted">${emp.line||''} · ${emp.rg||''}</div>
-          <div class="txt-muted" style="margin-top:2px;">СВ: ${emp.sv||'—'} · График: ${emp.graphSurv||'—'}</div>
+          <div class="profile-sv-tag">СВ: <b>${emp.sv||'—'}</b></div>
+          <div class="txt-muted txt-sm" style="margin-top:4px;">${emp.line||'—'} · РГ: ${emp.rg||'—'} · ${emp.graphSurv||'—'}</div>
           <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             ${badge(sc.status)}
-            ${isWork?`<span class="txt-muted txt-sm">${sc.shiftStart}–${sc.shiftEnd}</span>`:''}
-            <button class="btn btn-sm btn-ghost" onclick="toggleFav('${emp.name}');renderProfile('${emp.name}')" style="color:${isFav?'#f59e0b':'var(--txt-muted)'};">
+            ${isWork?`<span class="txt-muted txt-sm"><b>${sc.shiftStart}–${sc.shiftEnd}</b></span>`:''}
+            <button class="btn btn-sm btn-ghost" onclick="toggleFav('${safeName}');renderProfile('${safeName}')" style="color:${isFav?'#f59e0b':'var(--txt-muted)'};">
               ${isFav?'★ В избранном':'☆ Добавить'}
             </button>
           </div>
@@ -1762,13 +1888,25 @@ function initSearch() {
     } else {
       drop.innerHTML = matches.map(e => {
         const sc = getScheduleOn(e);
-        return `<div class="search-item" onclick="inp.value='';drop.classList.remove('open');navigate('employee',{id:'${e.name}'})">
+        const safeName = e.name.replace(/"/g, '&quot;');
+        return `<div class="search-item" data-emp="${safeName}">
           <div class="search-ava" style="background:${e.color}22;color:${e.color};">${e.name.split(' ').slice(0,2).map(w=>w[0]).join('')}</div>
-          <div><div class="search-name">${e.name}</div><div class="search-meta">${e.rg||''} · ${badge(sc.status)}</div></div>
+          <div><div class="search-name">${e.name}</div><div class="search-meta">${e.rg||''} · СВ: ${(e.sv||'').split(' ')[0]} · ${badge(sc.status)}</div></div>
         </div>`;
       }).join('');
     }
     drop.classList.add('open');
+  });
+
+  // Event delegation for click — replaces broken inline onclick
+  drop.addEventListener('click', ev => {
+    const item = ev.target.closest('.search-item');
+    if (!item) return;
+    const name = item.dataset.emp;
+    if (!name) return;
+    inp.value = '';
+    drop.classList.remove('open');
+    navigate('employee', { id: name });
   });
 
   document.addEventListener('click', ev => {
@@ -1821,8 +1959,45 @@ function applyTheme() {
 }
 
 function toggleTheme() { S.theme = S.theme==='light'?'dark':'light'; applyTheme(); savePrefs(); }
-function toggleCompact() { S.compact=!S.compact; document.body.classList.toggle('compact',S.compact); const b=el('compactBtn');b&&b.classList.toggle('active',S.compact); savePrefs(); }
 function toggleFullscreen() { if(!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{}); else document.exitFullscreen(); }
+
+// ═══════════════════ ON BREAK NOW ════════════════
+
+function getCurrentlyOnBreak() {
+  const now = new Date();
+  const nowMin = now.getHours()*60 + now.getMinutes();
+  if (!isToday(S.date)) return [];
+
+  const result = [];
+  S.breaks.forEach(b => {
+    (b.breaks||[]).forEach(br => {
+      const s = timeToMin(br.start);
+      const e = timeToMin(br.end);
+      if (nowMin >= s && nowMin < e) {
+        result.push({ name: b.name, sv: b.sv, type: br.type, start: br.start, end: br.end, remaining: e - nowMin });
+      }
+    });
+  });
+  return result;
+}
+
+function getReturningSoon() {
+  // Who will return from break within next 10 minutes
+  const now = new Date();
+  const nowMin = now.getHours()*60 + now.getMinutes();
+  if (!isToday(S.date)) return [];
+
+  const result = [];
+  S.breaks.forEach(b => {
+    (b.breaks||[]).forEach(br => {
+      const s = timeToMin(br.start);
+      if (s > nowMin && s - nowMin <= 10) {
+        result.push({ name: b.name, sv: b.sv, type: br.type, start: br.start, end: br.end, in: s - nowMin });
+      }
+    });
+  });
+  return result;
+}
 
 // ═══════════════════ LEGEND ══════════════════════
 
@@ -1844,7 +2019,7 @@ function emptyState(title, sub, icon='📭') {
 function init() {
   loadAll();
   applyTheme();
-  if (S.compact) { document.body.classList.add('compact'); el('compactBtn')&&el('compactBtn').classList.add('active'); }
+  // (compact mode removed)
 
   COLOR_MAP = buildColorMap(S.data);
   S.data.forEach(e => { if (!e.color) e.color = COLOR_MAP[e.name] || '#3b82f6'; });
@@ -1860,7 +2035,6 @@ function init() {
   initLegend();
 
   el('themeBtn')      && el('themeBtn').addEventListener('click', toggleTheme);
-  el('compactBtn')    && el('compactBtn').addEventListener('click', toggleCompact);
   el('fullscreenBtn') && el('fullscreenBtn').addEventListener('click', toggleFullscreen);
   el('modalClose')    && el('modalClose').addEventListener('click', closeModal);
   el('modalBackdrop') && el('modalBackdrop').addEventListener('click', ev => { if(ev.target===el('modalBackdrop')) closeModal(); });
