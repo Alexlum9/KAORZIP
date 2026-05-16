@@ -3,14 +3,31 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="KAORZIP — Локальная система управления графиками сотрудников банка" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
   <title>KAORZIP — Управление графиками</title>
   <link rel="stylesheet" href="style.css" />
+
+  <!-- IE/Edge Legacy detection — must be inline before body -->
+  <script>
+    (function() {
+      var ua = window.navigator.userAgent;
+      var isIE = ua.indexOf('MSIE') > -1 || ua.indexOf('Trident/') > -1;
+      var isOldEdge = ua.indexOf('Edge/') > -1 && ua.indexOf('Edg/') === -1;
+      if (isIE || isOldEdge) {
+        document.write('<div style="position:fixed;inset:0;z-index:99999;background:#1e293b;color:#f1f5f9;display:flex;align-items:center;justify-content:center;font-family:sans-serif;text-align:center;padding:20px;">'
+          + '<div><div style="font-size:48px;margin-bottom:20px;">🌐</div>'
+          + '<h1 style="font-size:24px;margin-bottom:12px;">Откройте в Google Chrome</h1>'
+          + '<p style="color:#94a3b8;margin-bottom:24px;">KAORZIP не работает в Internet Explorer и старом Edge.<br>Используйте файл <strong>launch.bat</strong> для автоматического запуска.</p>'
+          + '<div style="background:#0f172a;border-radius:8px;padding:16px;font-family:monospace;color:#10b981;">launch.bat</div></div></div>');
+        document.close();
+      }
+    })();
+  </script>
 </head>
 <body>
 <div class="app-layout">
 
-  <!-- ═══════════════════ SIDEBAR ═══════════════════ -->
+  <!-- ═══ SIDEBAR ═══════════════════════════════ -->
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <div class="logo">
@@ -20,109 +37,90 @@
           <span class="logo-sub">HR Scheduler</span>
         </div>
       </div>
-      <button class="icon-btn sidebar-close" id="sidebarClose" title="Закрыть меню">&#10005;</button>
+      <button class="icon-btn sidebar-close" id="sidebarClose">&#10005;</button>
     </div>
 
     <nav class="sidebar-nav">
       <div class="nav-group">
         <span class="nav-group-label">Обзор</span>
         <a class="nav-link active" data-page="dashboard" href="#dashboard">
-          <span class="nav-ico">&#9689;</span>
-          <span class="nav-txt">Dashboard</span>
+          <span class="nav-ico">⊞</span><span class="nav-txt">Dashboard</span>
         </a>
         <a class="nav-link" data-page="timeline" href="#timeline">
-          <span class="nav-ico">&#9632;&#9632;&#9632;</span>
-          <span class="nav-txt">Timeline</span>
+          <span class="nav-ico">▬▬</span><span class="nav-txt">Timeline смен</span>
         </a>
         <a class="nav-link" data-page="breaks" href="#breaks">
-          <span class="nav-ico">&#9749;</span>
-          <span class="nav-txt">Перерывы</span>
+          <span class="nav-ico">☕</span><span class="nav-txt">Перерывы</span>
         </a>
         <a class="nav-link" data-page="calendar" href="#calendar">
-          <span class="nav-ico">&#128197;</span>
-          <span class="nav-txt">Календарь</span>
+          <span class="nav-ico">📅</span><span class="nav-txt">Календарь</span>
         </a>
       </div>
-
       <div class="nav-group">
         <span class="nav-group-label">Сотрудники</span>
         <a class="nav-link" data-page="employees" href="#employees">
-          <span class="nav-ico">&#9678;</span>
-          <span class="nav-txt">Список</span>
+          <span class="nav-ico">◉</span><span class="nav-txt">Список</span>
         </a>
         <a class="nav-link" data-page="favorites" href="#favorites">
-          <span class="nav-ico">&#9733;</span>
-          <span class="nav-txt">Избранные</span>
+          <span class="nav-ico">★</span><span class="nav-txt">Избранные</span>
         </a>
       </div>
-
       <div class="nav-group">
         <span class="nav-group-label">Данные</span>
         <a class="nav-link" data-page="import" href="#import">
-          <span class="nav-ico">&#8681;</span>
-          <span class="nav-txt">Импорт Excel</span>
+          <span class="nav-ico">↓</span><span class="nav-txt">Импорт Excel</span>
         </a>
         <a class="nav-link" data-page="export" href="#export">
-          <span class="nav-ico">&#8679;</span>
-          <span class="nav-txt">Экспорт</span>
+          <span class="nav-ico">↑</span><span class="nav-txt">Экспорт</span>
         </a>
       </div>
     </nav>
 
     <div class="sidebar-footer">
       <div class="sidebar-tools">
-        <button class="tool-btn" id="themeBtn" title="Тёмная тема">&#9790;</button>
-        <button class="tool-btn" id="compactBtn" title="Компактный режим">&#8864;</button>
-        <button class="tool-btn" id="fullscreenBtn" title="Полный экран">&#9645;</button>
+        <button class="tool-btn" id="themeBtn" title="Тёмная тема">🌙</button>
+        <button class="tool-btn" id="compactBtn" title="Компактный режим">⊟</button>
+        <button class="tool-btn" id="fullscreenBtn" title="Полный экран">⛶</button>
       </div>
-      <div class="sidebar-version">v1.0 &bull; 2026</div>
+      <div class="sidebar-status" id="sidebarStatus"></div>
     </div>
   </aside>
 
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
-  <!-- ═══════════════════ MAIN ═══════════════════ -->
+  <!-- ═══ MAIN ═══════════════════════════════════ -->
   <div class="main-wrapper">
 
-    <!-- TOPBAR -->
     <header class="topbar">
       <div class="topbar-start">
-        <button class="icon-btn hamburger" id="hamburger" title="Меню">&#9776;</button>
+        <button class="icon-btn hamburger" id="hamburger">☰</button>
         <div class="breadcrumb" id="breadcrumb">Dashboard</div>
       </div>
-
       <div class="topbar-center">
         <div class="date-nav">
-          <button class="date-btn" id="prevDateBtn" title="Назад">&#8249;</button>
+          <button class="date-btn" id="prevDateBtn">‹</button>
           <button class="date-display" id="dateDisplay"></button>
-          <button class="date-btn" id="nextDateBtn" title="Вперёд">&#8250;</button>
+          <button class="date-btn" id="nextDateBtn">›</button>
           <button class="btn btn-sm btn-ghost" id="todayBtn">Сегодня</button>
         </div>
       </div>
-
       <div class="topbar-end">
         <div class="search-wrap">
-          <span class="search-icon">&#128269;</span>
-          <input class="search-input" id="globalSearch" type="text" placeholder="Поиск сотрудника..." autocomplete="off" />
+          <span class="search-ico">🔍</span>
+          <input class="search-field" id="globalSearch" type="text" placeholder="Поиск сотрудника…" autocomplete="off" />
           <div class="search-dropdown" id="searchDropdown"></div>
         </div>
       </div>
     </header>
 
-    <!-- PAGES -->
-    <div class="content-area" id="contentArea">
+    <div class="content-area">
 
       <!-- DASHBOARD -->
       <section class="page" id="page-dashboard">
         <div class="page-top">
-          <div>
-            <h1 class="page-title">Dashboard</h1>
-            <p class="page-subtitle" id="dashSubtitle"></p>
-          </div>
+          <div><h1 class="page-title">Dashboard</h1><p class="page-subtitle" id="dashSubtitle"></p></div>
           <div class="page-actions">
-            <select class="select-sm" id="dashDeptFilter">
-              <option value="">Все отделы</option>
-            </select>
+            <select class="select-sm" id="dashDeptFilter"><option value="">Все группы</option></select>
           </div>
         </div>
         <div id="dashContent"></div>
@@ -131,20 +129,18 @@
       <!-- TIMELINE -->
       <section class="page hidden" id="page-timeline">
         <div class="page-top">
-          <div>
-            <h1 class="page-title">Timeline смен</h1>
-            <p class="page-subtitle" id="timelineSubtitle"></p>
-          </div>
+          <div><h1 class="page-title">Timeline смен</h1><p class="page-subtitle" id="timelineSubtitle"></p></div>
           <div class="page-actions">
-            <select class="select-sm" id="tlDeptFilter"><option value="">Все отделы</option></select>
+            <select class="select-sm" id="tlRGFilter"><option value="">Все РГ</option></select>
             <select class="select-sm" id="tlSVFilter"><option value="">Все СВ</option></select>
             <select class="select-sm" id="tlShiftFilter">
-              <option value="">Все смены</option>
-              <option value="1">Смена 1</option>
-              <option value="2">Смена 2</option>
-              <option value="3">Смена 3</option>
+              <option value="">Все графики</option>
+              <option value="1 см">1 смена</option>
+              <option value="2 см">2 смена</option>
+              <option value="3 см">3 смена</option>
             </select>
-            <button class="btn btn-sm btn-outline" id="scrollNowBtn">&#9201; Сейчас</button>
+            <button class="btn btn-sm btn-outline" id="scrollNowBtn">⏰ Сейчас</button>
+            <button class="btn btn-sm btn-primary" id="tlExportImgBtn">📷 Сохранить PNG</button>
           </div>
         </div>
         <div id="timelineContent"></div>
@@ -153,13 +149,11 @@
       <!-- BREAKS -->
       <section class="page hidden" id="page-breaks">
         <div class="page-top">
-          <div>
-            <h1 class="page-title">График перерывов</h1>
-            <p class="page-subtitle" id="breaksSubtitle"></p>
-          </div>
+          <div><h1 class="page-title">График перерывов</h1><p class="page-subtitle" id="breaksSubtitle"></p></div>
           <div class="page-actions">
-            <select class="select-sm" id="brkDeptFilter"><option value="">Все отделы</option></select>
+            <select class="select-sm" id="brkRGFilter"><option value="">Все РГ</option></select>
             <select class="select-sm" id="brkSVFilter"><option value="">Все СВ</option></select>
+            <button class="btn btn-sm btn-primary" id="brkExportImgBtn">📷 Сохранить PNG</button>
           </div>
         </div>
         <div id="breaksContent"></div>
@@ -168,12 +162,10 @@
       <!-- CALENDAR -->
       <section class="page hidden" id="page-calendar">
         <div class="page-top">
-          <div>
-            <h1 class="page-title">Календарь</h1>
-          </div>
+          <div><h1 class="page-title">Календарь</h1></div>
           <div class="page-actions">
             <select class="select-sm" id="calEmpFilter"><option value="">Все сотрудники</option></select>
-            <select class="select-sm" id="calDeptFilter"><option value="">Все отделы</option></select>
+            <select class="select-sm" id="calRGFilter"><option value="">Все РГ</option></select>
           </div>
         </div>
         <div id="calendarContent"></div>
@@ -182,24 +174,22 @@
       <!-- EMPLOYEES -->
       <section class="page hidden" id="page-employees">
         <div class="page-top">
-          <div>
-            <h1 class="page-title">Сотрудники</h1>
-            <p class="page-subtitle" id="empSubtitle"></p>
-          </div>
+          <div><h1 class="page-title">Сотрудники</h1><p class="page-subtitle" id="empSubtitle"></p></div>
           <div class="page-actions">
-            <input class="search-input-inline" id="empSearch" type="text" placeholder="Поиск..." autocomplete="off" />
-            <select class="select-sm" id="empDeptFilter"><option value="">Все отделы</option></select>
+            <input class="search-field-inline" id="empSearch" type="text" placeholder="Поиск…" autocomplete="off" />
+            <select class="select-sm" id="empRGFilter"><option value="">Все РГ</option></select>
             <select class="select-sm" id="empSVFilter"><option value="">Все СВ</option></select>
             <select class="select-sm" id="empShiftFilter">
-              <option value="">Все смены</option>
-              <option value="1">Смена 1</option>
-              <option value="2">Смена 2</option>
-              <option value="3">Смена 3</option>
+              <option value="">Все графики</option>
+              <option value="1 см">1 смена</option>
+              <option value="2 см">2 смена</option>
+              <option value="3 см">3 смена</option>
             </select>
             <select class="select-sm" id="empStatusFilter">
               <option value="">Все статусы</option>
               <option value="work">Работает</option>
               <option value="21">Ночная</option>
+              <option value="9">Изм. смены</option>
               <option value="ОТ">Отпуск</option>
               <option value="БЛ">Больничный</option>
               <option value="НЯ">Неявка</option>
@@ -211,25 +201,19 @@
 
       <!-- FAVORITES -->
       <section class="page hidden" id="page-favorites">
-        <div class="page-top">
-          <h1 class="page-title">&#9733; Избранные</h1>
-        </div>
+        <div class="page-top"><h1 class="page-title">★ Избранные</h1></div>
         <div id="favContent"></div>
       </section>
 
       <!-- IMPORT -->
       <section class="page hidden" id="page-import">
-        <div class="page-top">
-          <h1 class="page-title">Импорт данных</h1>
-        </div>
+        <div class="page-top"><h1 class="page-title">Импорт данных</h1></div>
         <div id="importContent"></div>
       </section>
 
       <!-- EXPORT -->
       <section class="page hidden" id="page-export">
-        <div class="page-top">
-          <h1 class="page-title">Экспорт</h1>
-        </div>
+        <div class="page-top"><h1 class="page-title">Экспорт</h1></div>
         <div id="exportContent"></div>
       </section>
 
@@ -238,55 +222,48 @@
         <div id="profileContent"></div>
       </section>
 
-    </div><!-- /content-area -->
-  </div><!-- /main-wrapper -->
-</div><!-- /app-layout -->
+    </div>
+  </div>
+</div>
 
-<!-- ═══ EMPLOYEE MODAL ═══ -->
+<!-- MODAL -->
 <div class="modal-backdrop hidden" id="modalBackdrop">
-  <div class="modal" id="employeeModal" role="dialog" aria-modal="true">
+  <div class="modal" role="dialog" aria-modal="true">
     <div class="modal-header">
-      <h2 class="modal-title" id="modalTitle">Сотрудник</h2>
-      <button class="icon-btn" id="modalClose">&#10005;</button>
+      <h2 class="modal-title" id="modalTitle"></h2>
+      <button class="icon-btn" id="modalClose">✕</button>
     </div>
     <div class="modal-body" id="modalBody"></div>
   </div>
 </div>
 
-<!-- ═══ TOAST ═══ -->
+<!-- TOASTS -->
 <div class="toast-stack" id="toastStack"></div>
 
-<!-- ═══ LEGEND FAB ═══ -->
-<div class="legend-fab" id="legendFab">
-  <button class="legend-trigger" id="legendToggle" title="Цветовая легенда">&#9636;</button>
+<!-- LEGEND FAB -->
+<div class="legend-fab">
+  <button class="legend-trigger" id="legendToggle" title="Легенда">◈</button>
   <div class="legend-panel hidden" id="legendPanel">
-    <div class="legend-header">Цветовая легенда</div>
-    <div class="legend-list" id="legendList"></div>
+    <div class="legend-hdr">Цветовая легенда</div>
+    <div id="legendList"></div>
   </div>
 </div>
 
-<!-- ═══ SCRIPTS ═══ -->
-<!-- For offline use: download these to a /lib/ folder and update src paths -->
+<!-- SCRIPTS -->
 <script>
   window.XLSX_AVAILABLE = false;
-  window.H2C_AVAILABLE = false;
-  window.JSPDF_AVAILABLE = false;
+  window.H2C_AVAILABLE  = false;
+  window.JSPDF_AVAILABLE= false;
 </script>
-<script
-  src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"
-  onload="window.XLSX_AVAILABLE=true"
-  onerror="console.info('SheetJS unavailable — Excel import disabled')">
-</script>
-<script
-  src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"
-  onload="window.H2C_AVAILABLE=true"
-  onerror="console.info('html2canvas unavailable — PNG export disabled')">
-</script>
-<script
-  src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"
-  onload="window.JSPDF_AVAILABLE=true"
-  onerror="console.info('jsPDF unavailable — PDF export disabled')">
-</script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"
+        onload="window.XLSX_AVAILABLE=true"
+        onerror="console.info('SheetJS offline — Excel недоступен')"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"
+        onload="window.H2C_AVAILABLE=true"
+        onerror="console.info('html2canvas offline')"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"
+        onload="window.JSPDF_AVAILABLE=true"
+        onerror="console.info('jsPDF offline')"></script>
 <script src="app.js"></script>
 </body>
 </html>

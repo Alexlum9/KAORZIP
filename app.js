@@ -1,710 +1,823 @@
 /* ═══════════════════════════════════════════════
-   KAORZIP — Employee Scheduling Dashboard
-   app.js  |  Pure Vanilla JS  |  No backend
+   KAORZIP — app.js
+   Offline employee scheduling dashboard
+   No backend • LocalStorage • Real Excel I/O
 ═══════════════════════════════════════════════ */
-
 'use strict';
 
 // ═══════════════════ CONSTANTS ═══════════════════
 
-const STATUS = {
-  WORK:    'work',
-  NIGHT:   '21',
-  CHANGED: '9',
-  VACATION:'ОТ',
-  SICK:    'БЛ',
-  STUDY:   'УО',
-  UNPAID:  'ОЗ',
-  ABSENCE: 'НЯ',
-  OFF:     'off',
-};
-
 const STATUS_LABEL = {
-  work:  'Работает',  '21': 'Ночная смена',
-  '9':   'Изм. смены', ОТ: 'Отпуск',
-  БЛ:    'Больничный', УО:  'Уч. отпуск',
-  ОЗ:    'Отпуск б/с', НЯ:  'Неявка',
-  off:   'Выходной',
+  work:'Работает', '21':'Ночная смена', '9':'Изм. смены',
+  ОТ:'Отпуск', БЛ:'Больничный', УО:'Уч. отпуск',
+  ОЗ:'Отпуск б/с', НЯ:'Неявка', off:'Выходной',
 };
 
 const STATUS_COLOR = {
-  work:  '#3b82f6',  '21': '#8b5cf6',
-  '9':   '#10b981',  ОТ:  '#64748b',
-  БЛ:    '#ef4444',  УО:  '#06b6d4',
-  ОЗ:    '#f97316',  НЯ:  '#dc2626',
-  off:   '#94a3b8',
+  work:'#3b82f6', '21':'#8b5cf6', '9':'#10b981',
+  ОТ:'#64748b', БЛ:'#ef4444', УО:'#06b6d4',
+  ОЗ:'#f97316', НЯ:'#dc2626', off:'#94a3b8',
+};
+
+const BREAK_COLORS = {
+  'перерыв': '#f59e0b',
+  'обед':    '#f97316',
+  'ужин':    '#8b5cf6',
 };
 
 const LEGEND_ITEMS = [
-  { key: 'work',  label: 'Рабочая смена',   color: '#3b82f6' },
-  { key: '21',    label: 'Ночная смена',     color: '#8b5cf6' },
-  { key: '9',     label: 'Изменение смены',  color: '#10b981' },
-  { key: 'ОТ',    label: 'Отпуск',           color: '#64748b' },
-  { key: 'БЛ',    label: 'Больничный',        color: '#ef4444' },
-  { key: 'УО',    label: 'Учебный отпуск',   color: '#06b6d4' },
-  { key: 'ОЗ',    label: 'Отпуск б/с',       color: '#f97316' },
-  { key: 'НЯ',    label: 'Неявка',           color: '#dc2626' },
-  { key: 'break', label: 'Перерыв',          color: '#f59e0b' },
-  { key: 'lunch', label: 'Обед',             color: '#f97316' },
+  { label:'Рабочая смена',  color:'#3b82f6' },
+  { label:'Ночная смена',   color:'#8b5cf6' },
+  { label:'Изм. смены',     color:'#10b981' },
+  { label:'Отпуск',         color:'#64748b' },
+  { label:'Больничный',     color:'#ef4444' },
+  { label:'Уч. отпуск',     color:'#06b6d4' },
+  { label:'Отпуск б/с',     color:'#f97316' },
+  { label:'Неявка',         color:'#dc2626' },
+  { label:'Перерыв',        color:'#f59e0b' },
+  { label:'Обед',           color:'#f97316' },
+  { label:'Ужин',           color:'#8b5cf6' },
 ];
-
-// Timeline: 06:00–23:00, 1px = 1 minute
-const TL_START   = 6 * 60;   // 360 min
-const TL_END     = 23 * 60;  // 1380 min
-const TL_TOTAL   = TL_END - TL_START; // 1020 min
-const TL_PX_MIN  = 2;        // 2px per minute
-const TL_HOUR_W  = 60 * TL_PX_MIN; // 120px per hour
 
 const COLORS_POOL = [
   '#6366f1','#8b5cf6','#ec4899','#f43f5e','#f97316',
   '#eab308','#22c55e','#14b8a6','#06b6d4','#3b82f6',
+  '#84cc16','#06b6d4','#a855f7','#f59e0b','#10b981',
 ];
 
-const DAYS_RU = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
-const DAYS_FULL_RU = ['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
-const MONTHS_RU = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+const DAYS_RU  = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+const DAYS_FULL= ['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
 const MONTHS_GEN = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+const MONTHS_NOM = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 
-// ═══════════════════ STATE ══════════════════════
+// Timeline config
+const TL_START  = 8 * 60;    // 08:00
+const TL_END    = 22 * 60;   // 22:00
+const TL_PX_MIN = 2;         // 2px / minute
+const TL_HOUR_W = 60 * TL_PX_MIN;
+
+// ═══════════════════ STATE ═══════════════════════
 
 let S = {
-  page:      'dashboard',
-  date:      new Date(),
-  theme:     'light',
-  compact:   false,
-  favorites: [],
-  data:      null,
-  sortCol:   'name',
-  sortDir:   'asc',
-  calYear:   null,
-  calMonth:  null,
-  tlTooltip: null,
+  page:     'dashboard',
+  date:     new Date(),
+  theme:    'light',
+  compact:  false,
+  favorites:[],
+  data:     [],      // schedule employees (from file 1)
+  breaks:   [],      // break employees   (from file 2)
+  sortCol:  'name',
+  sortDir:  'asc',
+  calYear:  null,
+  calMonth: null,
 };
-
-// ═══════════════════ MOCK DATA ════════════════════
-
-const DEPARTMENTS = ['Обслуживание клиентов','Кредитный отдел','Операционный отдел'];
-
-const SUPERVISORS = [
-  { name: 'Александрова Н.В.', dept: 'Обслуживание клиентов' },
-  { name: 'Борисов К.А.',      dept: 'Обслуживание клиентов' },
-  { name: 'Смирнова Е.П.',     dept: 'Кредитный отдел' },
-  { name: 'Козлов Д.М.',       dept: 'Операционный отдел' },
-  { name: 'Петрова Т.С.',      dept: 'Операционный отдел' },
-];
-
-const SHIFT_TEMPLATES = {
-  '1': { start: '09:00', end: '18:00', breaks: [
-    { start: '11:00', end: '11:15', type: 'break' },
-    { start: '13:00', end: '14:00', type: 'lunch' },
-    { start: '16:00', end: '16:15', type: 'break' },
-  ]},
-  '2': { start: '12:00', end: '21:00', breaks: [
-    { start: '14:00', end: '14:15', type: 'break' },
-    { start: '16:00', end: '17:00', type: 'lunch' },
-    { start: '19:00', end: '19:15', type: 'break' },
-  ]},
-  '3': { start: '08:00', end: '17:00', breaks: [
-    { start: '10:00', end: '10:15', type: 'break' },
-    { start: '12:00', end: '13:00', type: 'lunch' },
-    { start: '15:00', end: '15:15', type: 'break' },
-  ]},
-  'night': { start: '21:00', end: '06:00', breaks: [
-    { start: '23:30', end: '23:45', type: 'break' },
-    { start: '02:00', end: '02:30', type: 'lunch' },
-    { start: '04:30', end: '04:45', type: 'break' },
-  ]},
-};
-
-const RAW_EMPLOYEES = [
-  // Dept 1 — Обслуживание клиентов / СВ: Александрова
-  { id:'e01', name:'Иванова Мария Сергеевна',      dept:DEPARTMENTS[0], sv:'Александрова Н.В.', shift:'1', pos:'Старший оператор' },
-  { id:'e02', name:'Петров Алексей Дмитриевич',    dept:DEPARTMENTS[0], sv:'Александрова Н.В.', shift:'1', pos:'Оператор' },
-  { id:'e03', name:'Сидорова Елена Владимировна',  dept:DEPARTMENTS[0], sv:'Александрова Н.В.', shift:'2', pos:'Оператор' },
-  { id:'e04', name:'Козырева Татьяна Ивановна',    dept:DEPARTMENTS[0], sv:'Александрова Н.В.', shift:'3', pos:'Оператор' },
-  { id:'e05', name:'Новиков Игорь Павлович',        dept:DEPARTMENTS[0], sv:'Александрова Н.В.', shift:'2', pos:'Консультант' },
-  // Dept 1 — СВ: Борисов
-  { id:'e06', name:'Морозова Ольга Николаевна',    dept:DEPARTMENTS[0], sv:'Борисов К.А.', shift:'1', pos:'Оператор' },
-  { id:'e07', name:'Волков Сергей Анатольевич',   dept:DEPARTMENTS[0], sv:'Борисов К.А.', shift:'1', pos:'Оператор' },
-  { id:'e08', name:'Лебедева Анна Викторовна',     dept:DEPARTMENTS[0], sv:'Борисов К.А.', shift:'2', pos:'Консультант' },
-  { id:'e09', name:'Соколов Дмитрий Петрович',    dept:DEPARTMENTS[0], sv:'Борисов К.А.', shift:'3', pos:'Оператор' },
-  // Dept 2 — Кредитный отдел / СВ: Смирнова
-  { id:'e10', name:'Захарова Наталья Юрьевна',    dept:DEPARTMENTS[1], sv:'Смирнова Е.П.', shift:'1', pos:'Кредитный специалист' },
-  { id:'e11', name:'Кириллов Андрей Борисович',   dept:DEPARTMENTS[1], sv:'Смирнова Е.П.', shift:'1', pos:'Аналитик' },
-  { id:'e12', name:'Орлова Светлана Михайловна',  dept:DEPARTMENTS[1], sv:'Смирнова Е.П.', shift:'2', pos:'Кредитный специалист' },
-  { id:'e13', name:'Федоров Роман Константинович', dept:DEPARTMENTS[1], sv:'Смирнова Е.П.', shift:'3', pos:'Специалист' },
-  { id:'e14', name:'Тихонова Юлия Александровна', dept:DEPARTMENTS[1], sv:'Смирнова Е.П.', shift:'1', pos:'Менеджер' },
-  { id:'e15', name:'Ефимов Василий Геннадьевич',  dept:DEPARTMENTS[1], sv:'Смирнова Е.П.', shift:'2', pos:'Специалист' },
-  // Dept 3 — Операционный отдел / СВ: Козлов
-  { id:'e16', name:'Воробьева Марина Олеговна',   dept:DEPARTMENTS[2], sv:'Козлов Д.М.', shift:'1', pos:'Операционист' },
-  { id:'e17', name:'Белов Максим Юрьевич',        dept:DEPARTMENTS[2], sv:'Козлов Д.М.', shift:'1', pos:'Операционист' },
-  { id:'e18', name:'Громова Ирина Дмитриевна',    dept:DEPARTMENTS[2], sv:'Козлов Д.М.', shift:'2', pos:'Специалист' },
-  // Dept 3 — СВ: Петрова
-  { id:'e19', name:'Симонов Артём Алексеевич',    dept:DEPARTMENTS[2], sv:'Петрова Т.С.', shift:'3', pos:'Ночной оператор' },
-  { id:'e20', name:'Панова Кристина Вячеславовна',dept:DEPARTMENTS[2], sv:'Петрова Т.С.', shift:'1', pos:'Операционист' },
-  { id:'e21', name:'Логинов Евгений Станиславович',dept:DEPARTMENTS[2], sv:'Петрова Т.С.', shift:'2', pos:'Операционист' },
-  { id:'e22', name:'Романова Вера Викторовна',    dept:DEPARTMENTS[2], sv:'Петрова Т.С.', shift:'3', pos:'Специалист' },
-  { id:'e23', name:'Суворов Николай Иванович',    dept:DEPARTMENTS[2], sv:'Петрова Т.С.', shift:'1', pos:'Ст. операционист' },
-  { id:'e24', name:'Крылова Диана Сергеевна',     dept:DEPARTMENTS[2], sv:'Козлов Д.М.', shift:'2', pos:'Операционист' },
-  { id:'e25', name:'Медведев Илья Романович',     dept:DEPARTMENTS[2], sv:'Козлов Д.М.', shift:'3', pos:'Ночной специалист' },
-];
-
-function buildColorMap() {
-  const map = {};
-  RAW_EMPLOYEES.forEach((e, i) => {
-    map[e.id] = COLORS_POOL[i % COLORS_POOL.length];
-  });
-  return map;
-}
-const EMP_COLORS = buildColorMap();
-
-// Generate a realistic schedule for May 2026
-function generateSchedule(emp) {
-  const year = 2026, month = 4; // May = 4 (0-indexed)
-  const daysInMonth = 31;
-  const schedule = {};
-
-  // Assign vacation/sick periods for some employees
-  const specialDays = {};
-
-  if (emp.id === 'e03') { // vacation 10-20 May
-    for (let d = 10; d <= 20; d++) specialDays[d] = STATUS.VACATION;
-  }
-  if (emp.id === 'e08') { // sick 5-12 May
-    for (let d = 5; d <= 12; d++) specialDays[d] = STATUS.SICK;
-  }
-  if (emp.id === 'e13') { // study leave 1-7
-    for (let d = 1; d <= 7; d++) specialDays[d] = STATUS.STUDY;
-  }
-  if (emp.id === 'e18') { // unpaid leave 15-17
-    for (let d = 15; d <= 17; d++) specialDays[d] = STATUS.UNPAID;
-  }
-  if (emp.id === 'e22') { // absence on 8
-    specialDays[8] = STATUS.ABSENCE;
-  }
-  if (emp.id === 'e19' || emp.id === 'e25') { // night shift workers
-    emp._nightShift = true;
-  }
-  if (emp.id === 'e05') { // changed shift on 19
-    specialDays[19] = STATUS.CHANGED;
-  }
-
-  for (let d = 1; d <= daysInMonth; d++) {
-    const date = new Date(year, month, d);
-    const dow = date.getDay(); // 0=Sun, 6=Sat
-    const dateKey = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-
-    if (specialDays[d]) {
-      const sp = specialDays[d];
-      if (sp === STATUS.CHANGED) {
-        // Changed shift — use shift 2 template instead of 1
-        schedule[dateKey] = {
-          status: STATUS.CHANGED,
-          shiftStart: '10:00',
-          shiftEnd: '19:00',
-          breaks: [
-            { start: '12:00', end: '12:15', type: 'break' },
-            { start: '14:00', end: '15:00', type: 'lunch' },
-            { start: '17:00', end: '17:15', type: 'break' },
-          ],
-        };
-      } else {
-        schedule[dateKey] = { status: sp };
-      }
-      continue;
-    }
-
-    // Night shift workers work Tue, Thu, Sat nights (21:00–06:00)
-    if (emp._nightShift) {
-      if (dow === 2 || dow === 4 || dow === 6) {
-        schedule[dateKey] = {
-          status: STATUS.NIGHT,
-          shiftStart: '21:00',
-          shiftEnd: '06:00',
-          breaks: SHIFT_TEMPLATES.night.breaks,
-        };
-      } else {
-        schedule[dateKey] = { status: STATUS.OFF };
-      }
-      continue;
-    }
-
-    // Regular employees: Mon–Fri work, Sat by shift
-    const isWorkday = dow >= 1 && dow <= 5;
-    const isSat = dow === 6;
-
-    let works = false;
-    if (emp.shift === '1' && isWorkday) works = true;
-    if (emp.shift === '2' && isWorkday) works = true;
-    if (emp.shift === '3' && isWorkday) works = true;
-    if (emp.shift === '2' && isSat) works = true; // shift 2 works Saturdays too
-
-    if (works) {
-      const tpl = SHIFT_TEMPLATES[emp.shift];
-      schedule[dateKey] = {
-        status: STATUS.WORK,
-        shiftStart: tpl.start,
-        shiftEnd: tpl.end,
-        breaks: tpl.breaks,
-      };
-    } else {
-      schedule[dateKey] = { status: STATUS.OFF };
-    }
-  }
-  return schedule;
-}
-
-function buildMockData() {
-  return RAW_EMPLOYEES.map(e => ({
-    ...e,
-    color: EMP_COLORS[e.id],
-    schedule: generateSchedule({ ...e }),
-  }));
-}
 
 // ═══════════════════ LOCALSTORAGE ════════════════
 
-const LS_KEY = 'kaorzip_data';
-const LS_PREF = 'kaorzip_prefs';
+const LS = {
+  SCHEDULE: 'kz_schedule',
+  BREAKS:   'kz_breaks',
+  PREFS:    'kz_prefs',
+};
 
-function saveData(data) {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(data)); } catch(e) {}
+function saveSchedule() {
+  try { localStorage.setItem(LS.SCHEDULE, JSON.stringify(S.data)); } catch(e) { console.warn('LS save err', e); }
 }
-
-function loadData() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch(e) { return null; }
+function saveBreaks() {
+  try { localStorage.setItem(LS.BREAKS, JSON.stringify(S.breaks)); } catch(e) {}
 }
-
 function savePrefs() {
-  try {
-    localStorage.setItem(LS_PREF, JSON.stringify({
-      theme: S.theme,
-      compact: S.compact,
-      favorites: S.favorites,
-    }));
-  } catch(e) {}
+  try { localStorage.setItem(LS.PREFS, JSON.stringify({ theme: S.theme, compact: S.compact, favorites: S.favorites })); } catch(e) {}
 }
-
-function loadPrefs() {
+function loadAll() {
   try {
-    const raw = localStorage.getItem(LS_PREF);
-    if (!raw) return;
-    const p = JSON.parse(raw);
-    if (p.theme)     S.theme     = p.theme;
-    if (p.compact)   S.compact   = p.compact;
-    if (p.favorites) S.favorites = p.favorites;
-  } catch(e) {}
+    const sc = localStorage.getItem(LS.SCHEDULE);
+    if (sc) S.data = JSON.parse(sc);
+    const br = localStorage.getItem(LS.BREAKS);
+    if (br) S.breaks = JSON.parse(br);
+    const pr = localStorage.getItem(LS.PREFS);
+    if (pr) { const p = JSON.parse(pr); Object.assign(S, { theme: p.theme||'light', compact: !!p.compact, favorites: p.favorites||[] }); }
+  } catch(e) { console.warn('LS load err', e); }
 }
 
 // ═══════════════════ DATE UTILS ══════════════════
 
 function dateKey(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth()+1).padStart(2,'0');
-  const day = String(d.getDate()).padStart(2,'0');
-  return `${y}-${m}-${day}`;
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
-
-function parseDate(str) {
-  const [y,m,d] = str.split('-').map(Number);
-  return new Date(y, m-1, d);
+function pad(n) { return String(n).padStart(2,'0'); }
+function parseDate(s) {
+  if (!s) return null;
+  if (s instanceof Date) return s;
+  const d = new Date(s);
+  return isNaN(d) ? null : d;
 }
-
-function formatDisplayDate(d) {
-  return `${d.getDate()} ${MONTHS_GEN[d.getMonth()]} ${d.getFullYear()}, ${DAYS_FULL_RU[d.getDay()]}`;
-}
-
-function formatShortDate(d) {
-  return `${d.getDate()} ${MONTHS_GEN[d.getMonth()]}`;
-}
-
-function timeToMin(t) {
-  const [h,m] = t.split(':').map(Number);
-  return h * 60 + m;
-}
-
-function minToTime(m) {
-  const h = Math.floor(m / 60) % 24;
-  const min = m % 60;
-  return `${String(h).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
-}
-
-function addDays(d, n) {
-  const r = new Date(d);
-  r.setDate(r.getDate() + n);
-  return r;
-}
-
-function sameDay(a, b) {
-  return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
-}
-
+function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate()+n); return r; }
+function sameDay(a,b) { return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate(); }
 function isToday(d) { return sameDay(d, new Date()); }
+function formatDisp(d) { return `${d.getDate()} ${MONTHS_GEN[d.getMonth()]} ${d.getFullYear()}, ${DAYS_FULL[d.getDay()]}`; }
+function timeToMin(t) { if (!t) return 0; const [h,m]=(t||'').split(':').map(Number); return h*60+(m||0); }
+function minToTime(m) { return `${pad(Math.floor(m/60)%24)}:${pad(m%60)}`; }
 
-// ═══════════════════ DOM HELPERS ═════════════════
+// ═══════════════════ DOM UTILS ═══════════════════
 
 function el(id) { return document.getElementById(id); }
 function qs(sel, ctx=document) { return ctx.querySelector(sel); }
 function qsa(sel, ctx=document) { return [...ctx.querySelectorAll(sel)]; }
+function setHTML(id, h) { const n=typeof id==='string'?el(id):id; if(n) n.innerHTML=h; }
 
-function html(tag, attrs={}, ...children) {
-  const e = document.createElement(tag);
-  Object.entries(attrs).forEach(([k,v]) => {
-    if (k === 'class') e.className = v;
-    else if (k === 'style') e.style.cssText = v;
-    else if (k.startsWith('on')) e[k] = v;
-    else e.setAttribute(k, v);
-  });
-  children.forEach(c => {
-    if (c == null || c === false) return;
-    e.append(typeof c === 'string' ? document.createTextNode(c) : c);
-  });
-  return e;
-}
-
-function setHTML(id, content) {
-  const node = typeof id === 'string' ? el(id) : id;
-  if (node) node.innerHTML = content;
-}
-
-function makeAvatar(name, color, size=36) {
-  const initials = name.split(' ').slice(0,2).map(w=>w[0]).join('').toUpperCase();
-  return `<div class="emp-avatar" style="width:${size}px;height:${size}px;background:${color}20;color:${color};font-size:${size*.33}px;">${initials}</div>`;
-}
-
-function avatarSvg(name, color) {
-  const initials = name.split(' ').slice(0,2).map(w=>w[0]).join('').toUpperCase();
-  return `<span class="emp-avatar-sm" style="background:${color}20;color:${color};">${initials}</span>`;
+function avatarHTML(name, color, size=32) {
+  const ini = (name||'?').split(' ').slice(0,2).map(w=>w[0]||'').join('').toUpperCase();
+  return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color}22;color:${color};font-size:${Math.round(size*.33)}px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${ini}</div>`;
 }
 
 function badge(status) {
-  const label = STATUS_LABEL[status] || status;
-  const cls = {
-    work:'badge-work','21':'badge-night','9':'badge-changed',
-    ОТ:'badge-vacation',БЛ:'badge-sick',УО:'badge-study',
-    ОЗ:'badge-unpaid',НЯ:'badge-absence',off:'',
-  }[status] || '';
-  return `<span class="badge ${cls}">${label}</span>`;
+  const cls = {work:'badge-work','21':'badge-night','9':'badge-changed',ОТ:'badge-vac',БЛ:'badge-sick',УО:'badge-study',ОЗ:'badge-unpaid',НЯ:'badge-absence',off:'badge-off'}[status]||'';
+  return `<span class="badge ${cls}">${STATUS_LABEL[status]||status||'—'}</span>`;
 }
 
 // ═══════════════════ TOAST ═══════════════════════
 
 function toast(msg, type='') {
-  const t = html('div', {class:`toast ${type?'toast-'+type:''}`}, msg);
+  const t = document.createElement('div');
+  t.className = `toast${type?' toast-'+type:''}`;
+  t.textContent = msg;
   el('toastStack').appendChild(t);
-  setTimeout(() => t.remove(), 3000);
+  setTimeout(() => t.remove(), 3200);
 }
 
 // ═══════════════════ MODAL ═══════════════════════
 
-function openModal(title, bodyHTML) {
+function openModal(title, body) {
   el('modalTitle').textContent = title;
-  setHTML('modalBody', bodyHTML);
+  setHTML('modalBody', body);
   el('modalBackdrop').classList.remove('hidden');
 }
+function closeModal() { el('modalBackdrop').classList.add('hidden'); }
 
-function closeModal() {
-  el('modalBackdrop').classList.add('hidden');
+// ═══════════════════ COLOR MAP ═══════════════════
+
+function buildColorMap(employees) {
+  const map = {};
+  employees.forEach((e,i) => { map[e.name] = COLORS_POOL[i % COLORS_POOL.length]; });
+  return map;
+}
+
+let COLOR_MAP = {};
+
+// ═══════════════════════════════════════════════
+// EXCEL PARSING — SCHEDULE FILE (FORMAT: 5 cols/day)
+// ═══════════════════════════════════════════════
+
+function parseExcelDate(v) {
+  if (!v && v !== 0) return null;
+  if (v instanceof Date) return v;
+  if (typeof v === 'number' && v > 40000) {
+    // Excel serial date — 25569 = days from 1900-01-01 to 1970-01-01
+    return new Date(Math.round((v - 25569) * 864e5));
+  }
+  if (typeof v === 'string') {
+    const d = new Date(v);
+    if (!isNaN(d) && d.getFullYear() > 2000) return d;
+  }
+  return null;
+}
+
+function parseDayBlock(cells) {
+  // cells = 5 values: [c1, c2, c3, c4, c5]
+  const raw = cells.map(v => (v == null ? '' : String(v).trim()));
+  const [c1, c2, c3, c4, c5] = raw;
+
+  if (!c1 && !c2 && !c3) return { status: 'off', raw };
+
+  // Special leave codes: "бл/11", "от/11", "уо/11", "оз/11", "ня/11"
+  // or just "бл", "от", etc.
+  const specRe = /^(бл|от|уо|оз|ня)(\/\d+)?$/i;
+  const specMatch = c1.match(specRe) || c2.match(specRe) || c3.match(specRe);
+  if (specMatch) {
+    const codeMap = { бл:'БЛ', от:'ОТ', уо:'УО', оз:'ОЗ', ня:'НЯ' };
+    const key = specMatch[1].toLowerCase();
+    return { status: codeMap[key], raw };
+  }
+
+  const startN = parseInt(c1);
+  if (isNaN(startN) || startN === 0) {
+    // 0 = выходной
+    if (c1 === '0' || (c1==='' && c2==='0')) return { status: 'off', raw };
+    return { status: 'off', raw };
+  }
+
+  const endN   = parseInt(c2);
+  const lunchN = parseInt(c3);
+  const marker = parseInt(c5);
+
+  // Night shift: start at 21
+  if (startN === 21) {
+    return {
+      status: '21',
+      shiftStart: '21:00',
+      shiftEnd:   `${pad(endN)}:00`,
+      lunchHour:  isNaN(lunchN) ? null : lunchN,
+      raw,
+    };
+  }
+
+  // Changed shift (marker=9) or regular
+  const status = (marker === 9) ? '9' : 'work';
+
+  return {
+    status,
+    shiftStart: `${pad(startN)}:00`,
+    shiftEnd:   `${pad(endN)}:00`,
+    lunchHour:  isNaN(lunchN) ? null : lunchN,
+    raw,
+  };
+}
+
+function parseScheduleWorkbook(wb) {
+  const SKIP_SHEETS = ['обозначения', 'Обозначения', 'Legend', 'legend'];
+  const employees = {};   // name → emp object
+  const meta = { months: [] };
+
+  for (const sheetName of wb.SheetNames) {
+    if (SKIP_SHEETS.includes(sheetName)) continue;
+
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+
+    // Use raw:true to get numeric dates, raw cell values
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+    if (!rows.length) continue;
+
+    const hdr = rows[0] || [];
+
+    // Find date columns: starting from col 7 (0-indexed), every 5 cols
+    const dateCols = [];
+    for (let c = 7; c < hdr.length; c++) {
+      const d = parseExcelDate(hdr[c]);
+      if (d && d.getFullYear() > 2020) {
+        dateCols.push({ col: c, date: d });
+        c += 4; // skip 4 more cols to next date
+      }
+    }
+
+    if (!dateCols.length) continue;
+
+    meta.months.push({
+      sheetName,
+      startDate: dateCols[0].date,
+      endDate:   dateCols[dateCols.length-1].date,
+      dateCols,
+    });
+
+    // Parse employee rows (skip row 0 = header)
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r] || [];
+      const name = String(row[0]||'').trim();
+      if (!name || name.length < 2) continue;
+
+      if (!employees[name]) {
+        employees[name] = {
+          name,
+          rg:        String(row[1]||'').trim(),
+          line:      String(row[2]||'').trim(),
+          sv:        String(row[3]||'').trim(),
+          hireDate:  String(row[4]||'').trim(),
+          graphSurv: String(row[5]||'').trim(),
+          shiftCode: String(row[6]||'').trim(),
+          schedule:  {},
+          color:     COLORS_POOL[Object.keys(employees).length % COLORS_POOL.length],
+        };
+      }
+
+      const emp = employees[name];
+
+      for (const { col, date } of dateCols) {
+        const cells = (row.slice(col, col+5) || []).map(v => v==null ? '' : v);
+        const dayData = parseDayBlock(cells);
+        const dk = dateKey(date);
+        // Only update if new data is non-off, or slot is empty
+        if (!emp.schedule[dk] || dayData.status !== 'off' || emp.schedule[dk].status === 'off') {
+          emp.schedule[dk] = dayData;
+        }
+      }
+    }
+  }
+
+  const result = Object.values(employees);
+  COLOR_MAP = buildColorMap(result);
+  result.forEach(e => { e.color = COLOR_MAP[e.name]; });
+
+  return { employees: result, meta };
+}
+
+// ═══════════════════════════════════════════════
+// EXCEL PARSING — BREAKS FILE (10-min slots)
+// ═══════════════════════════════════════════════
+
+function parseBreaksWorkbook(wb) {
+  const employees = [];
+
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+    if (!rows.length) continue;
+
+    const hdr = rows[0] || [];
+    // Time slots start from col 3 (0-indexed)
+    const timeSlots = hdr.slice(3);
+
+    // Row at index 1 is "Кол-во операторов" — skip
+    const startRow = rows[1] && (String(rows[1][0]||'').toLowerCase().includes('кол') || rows[1][0]==='') ? 2 : 1;
+
+    for (let r = startRow; r < rows.length; r++) {
+      const row = rows[r] || [];
+      const name = String(row[0]||'').trim();
+      if (!name || name.length < 2) continue;
+
+      const shift = String(row[1]||'').trim();  // e.g. "08:00–20:00"
+      const sv    = String(row[2]||'').trim();
+
+      // Parse break slots
+      const breaks = [];
+      let cur = null;
+
+      for (let i = 0; i < timeSlots.length; i++) {
+        const timeLabel = timeSlots[i];
+        const val = String(row[3+i]||'').trim().toLowerCase();
+        const type = val === 'перерыв' ? 'перерыв'
+                   : val === 'обед'    ? 'обед'
+                   : val === 'ужин'    ? 'ужин'
+                   : null;
+
+        if (type) {
+          if (!cur || cur.type !== type) {
+            if (cur) breaks.push(cur);
+            cur = { start: timeLabel, end: addMinutesToStr(timeLabel, 10), type, sheetName };
+          } else {
+            cur.end = addMinutesToStr(timeLabel, 10);
+          }
+        } else {
+          if (cur) { breaks.push(cur); cur = null; }
+        }
+      }
+      if (cur) breaks.push(cur);
+
+      employees.push({ name, shift, sv, breaks, sheetName });
+    }
+  }
+
+  return employees;
+}
+
+function addMinutesToStr(timeStr, mins) {
+  if (!timeStr || !timeStr.includes(':')) return timeStr;
+  const [h,m] = timeStr.split(':').map(Number);
+  const total = h*60 + m + mins;
+  return `${pad(Math.floor(total/60)%24)}:${pad(total%60)}`;
+}
+
+// ═══════════════════════════════════════════════
+// EXCEL EXPORT — SCHEDULE (faithful round-trip)
+// ═══════════════════════════════════════════════
+
+function buildDayBlockExport(sc) {
+  if (!sc || sc.status === 'off') return ['','','','',''];
+
+  // If we have the raw original values, return them unchanged
+  if (sc.raw && sc.raw.some(v => v !== '')) {
+    return sc.raw.map(v => v === '' ? '' : v);
+  }
+
+  // Reconstruct from parsed data
+  const codeMap = { БЛ:'бл', ОТ:'от', УО:'уо', ОЗ:'оз', НЯ:'ня' };
+  if (codeMap[sc.status]) {
+    const code = `${codeMap[sc.status]}/11`;
+    return [code, code, code, code, 0];
+  }
+
+  const sH = sc.shiftStart ? parseInt(sc.shiftStart) : '';
+  const eH = sc.shiftEnd   ? parseInt(sc.shiftEnd)   : '';
+  const lH = sc.lunchHour  || '';
+  const c4 = sc.status === '21' ? 24 : eH;
+  const c5 = sc.status === '9'  ? 9  : 0;
+
+  return [sH, eH, lH, c4, c5];
+}
+
+function exportScheduleExcel() {
+  if (!window.XLSX_AVAILABLE) { toast('SheetJS не загружен — нужен интернет', 'warning'); return; }
+  if (!S.data.length) { toast('Нет данных для экспорта', 'warning'); return; }
+
+  const wb = XLSX.utils.book_new();
+
+  // Group schedule by month
+  const monthMap = {};
+  S.data.forEach(emp => {
+    Object.entries(emp.schedule||{}).forEach(([dk, sc]) => {
+      const d = parseDate(dk);
+      if (!d) return;
+      const key = `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
+      if (!monthMap[key]) monthMap[key] = { year: d.getFullYear(), month: d.getMonth(), days: new Set() };
+      monthMap[key].days.add(d.getDate());
+    });
+  });
+
+  const MONTH_NAMES_RU = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+
+  Object.entries(monthMap).sort().forEach(([mKey, info]) => {
+    const { year, month } = info;
+    const daysInMonth = new Date(year, month+1, 0).getDate();
+    const sheetName = `${MONTH_NAMES_RU[month]}_${String(year).slice(2)}`;
+
+    // Build header row
+    const hdrRow = ['ФИО','РГ','Линия/позиция','СВ','Дата приема','График сурв','Смена'];
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dt = new Date(year, month, d);
+      // Store as Excel serial date
+      const serial = (dt.getTime() / 864e5) + 25569;
+      hdrRow.push(serial, '', '', '', '');
+    }
+
+    // Build data rows
+    const dataRows = [hdrRow];
+
+    S.data.forEach(emp => {
+      const row = [emp.name, emp.rg||'', emp.line||'', emp.sv||'', emp.hireDate||'', emp.graphSurv||'', emp.shiftCode||''];
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dk = `${year}-${pad(month+1)}-${pad(d)}`;
+        const sc = emp.schedule[dk] || { status: 'off' };
+        row.push(...buildDayBlockExport(sc));
+      }
+      dataRows.push(row);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(dataRows);
+
+    // Format date cells in header
+    const dateStyle = { numFmt: 'DD.MM.YYYY' };
+    for (let d = 0; d < daysInMonth; d++) {
+      const colIdx = 7 + d*5;
+      const cellAddr = XLSX.utils.encode_cell({ r: 0, c: colIdx });
+      if (ws[cellAddr]) ws[cellAddr].t = 'n';
+    }
+
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  });
+
+  // Обозначения sheet
+  const oznWs = XLSX.utils.aoa_to_sheet([
+    ['Аббревиатура','Расшифровка','Как выглядит в рабочих сменах'],
+    ['БЛ','Больничный','бл/11'],
+    ['ОТ','Оплачиваемый отпуск','от/11'],
+    ['УО','Учебный отпуск','уо/11'],
+    ['ОЗ','Отпуск за свой счет','оз/11'],
+    ['НЯ','Неявка','ня/11'],
+    [],[],
+    ['Цветовое обозначение','Расшифровка',''],
+    [9,'Изменение смены (перенос, подмена)',''],
+    [21,'Ночная смена',''],
+  ]);
+  XLSX.utils.book_append_sheet(wb, oznWs, 'обозначения');
+
+  XLSX.writeFile(wb, `KAORZIP_Расписание_${dateKey(new Date())}.xlsx`);
+  toast('✅ Расписание выгружено', 'success');
+}
+
+// ═══════════════════════════════════════════════
+// EXCEL EXPORT — BREAKS (10-min slot format)
+// ═══════════════════════════════════════════════
+
+function exportBreaksExcel() {
+  if (!window.XLSX_AVAILABLE) { toast('SheetJS не загружен', 'warning'); return; }
+  if (!S.breaks.length) { toast('Нет данных перерывов', 'warning'); return; }
+
+  const wb = XLSX.utils.book_new();
+
+  // Group by sheet (day type)
+  const sheetGroups = {};
+  S.breaks.forEach(e => {
+    const sn = e.sheetName || 'Дневные';
+    if (!sheetGroups[sn]) sheetGroups[sn] = [];
+    sheetGroups[sn].push(e);
+  });
+
+  Object.entries(sheetGroups).forEach(([sheetName, employees]) => {
+    // Build time axis: 08:00 to 22:00 in 10-min steps
+    const slots = [];
+    for (let m = 8*60; m <= 22*60; m += 10) slots.push(minToTime(m));
+
+    // Header row
+    const hdr = ['ФИО','Смена','СВ', ...slots];
+
+    // Count row: how many on break each slot
+    const countRow = ['Кол-во операторов','','', ...slots.map(() => 0)];
+
+    // Employee rows
+    const empRows = employees.map(emp => {
+      const row = [emp.name, emp.shift, emp.sv, ...slots.map(() => '')];
+      (emp.breaks||[]).forEach(brk => {
+        const startMin = timeToMin(brk.start);
+        const endMin   = timeToMin(brk.end);
+        for (let m = startMin; m < endMin; m += 10) {
+          const tStr = minToTime(m);
+          const idx  = slots.indexOf(tStr);
+          if (idx >= 0) {
+            row[3 + idx] = brk.type;
+            countRow[3 + idx]++;
+          }
+        }
+      });
+      return row;
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet([hdr, countRow, ...empRows]);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  });
+
+  XLSX.writeFile(wb, `KAORZIP_Перерывы_${dateKey(new Date())}.xlsx`);
+  toast('✅ Перерывы выгружены', 'success');
+}
+
+// ═══════════════════════════════════════════════
+// IMAGE / PDF EXPORT
+// ═══════════════════════════════════════════════
+
+async function captureAndSave(elementId, filename, caption='') {
+  if (!window.H2C_AVAILABLE) { toast('html2canvas не загружен (нужен интернет)', 'warning'); return; }
+  const node = el(elementId);
+  if (!node) { toast('Нечего сохранять', 'warning'); return; }
+  toast('⏳ Генерация изображения…');
+  try {
+    const canvas = await html2canvas(node, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+    if (caption) {
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 24px sans-serif';
+      ctx.fillText(caption, 20, 30);
+    }
+    const a = document.createElement('a');
+    a.download = filename;
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+    toast('✅ Изображение сохранено', 'success');
+  } catch(e) { toast('❌ Ошибка: ' + e.message, 'error'); }
+}
+
+async function captureAndPDF(elementId, filename) {
+  if (!window.H2C_AVAILABLE || !window.JSPDF_AVAILABLE) { toast('Нужен интернет для библиотек PDF', 'warning'); return; }
+  const node = el(elementId);
+  if (!node) return;
+  toast('⏳ Генерация PDF…');
+  try {
+    const canvas = await html2canvas(node, { scale: 1.5, backgroundColor: '#ffffff' });
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [canvas.width, canvas.height] });
+    pdf.addImage(canvas.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, canvas.width, canvas.height);
+    pdf.save(filename);
+    toast('✅ PDF сохранён', 'success');
+  } catch(e) { toast('❌ Ошибка PDF: ' + e.message, 'error'); }
+}
+
+function exportJSON() {
+  const payload = { schedule: S.data, breaks: S.breaks, exported: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.download = `KAORZIP_backup_${dateKey(new Date())}.json`;
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('✅ JSON резервная копия сохранена', 'success');
+}
+
+function exportTextReport() {
+  const dk = dateKey(S.date);
+  const lines = [`📅 График на ${formatDisp(S.date)}`, ''];
+  const rgs = [...new Set(S.data.map(e=>e.rg))].filter(Boolean).sort();
+  (rgs.length ? rgs : ['']).forEach(rg => {
+    const group = rg ? S.data.filter(e=>e.rg===rg) : S.data;
+    if (rg) lines.push(`📂 ${rg}:`);
+    group.forEach(e => {
+      const sc = e.schedule[dk] || { status:'off' };
+      const t = sc.shiftStart ? ` (${sc.shiftStart}–${sc.shiftEnd})` : '';
+      lines.push(`  • ${e.name} — ${STATUS_LABEL[sc.status]||'—'}${t}`);
+    });
+    lines.push('');
+  });
+  const text = lines.join('\n');
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => toast('✅ Скопировано в буфер', 'success'));
+  } else {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+    toast('✅ Скопировано', 'success');
+  }
 }
 
 // ═══════════════════ NAVIGATION ══════════════════
 
 const PAGE_LABELS = {
-  dashboard:'Dashboard', timeline:'Timeline', breaks:'Перерывы',
+  dashboard:'Dashboard', timeline:'Timeline смен', breaks:'Перерывы',
   calendar:'Календарь', employees:'Сотрудники', favorites:'Избранные',
-  import:'Импорт Excel', export:'Экспорт', employee:'Профиль',
+  import:'Импорт данных', export:'Экспорт', employee:'Профиль',
 };
 
 function navigate(page, params={}) {
-  // Hide all pages
   qsa('.page').forEach(p => p.classList.add('hidden'));
-  // Show target
   const target = el(`page-${page}`);
   if (!target) return;
   target.classList.remove('hidden');
-
-  // Update nav links
-  qsa('.nav-link').forEach(l => {
-    l.classList.toggle('active', l.dataset.page === page);
-  });
-
+  qsa('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page===page));
   S.page = page;
-  el('breadcrumb').textContent = PAGE_LABELS[page] || page;
-
-  // Render page content
-  switch (page) {
-    case 'dashboard':  renderDashboard();  break;
-    case 'timeline':   renderTimeline();   break;
-    case 'breaks':     renderBreaks();     break;
-    case 'calendar':   renderCalendar();   break;
-    case 'employees':  renderEmployees();  break;
-    case 'favorites':  renderFavorites();  break;
-    case 'import':     renderImport();     break;
-    case 'export':     renderExport();     break;
-    case 'employee':   renderProfile(params.id); break;
-  }
-
+  el('breadcrumb').textContent = PAGE_LABELS[page]||page;
+  const renders = { dashboard:renderDashboard, timeline:renderTimeline, breaks:renderBreaksPage,
+    calendar:renderCalendar, employees:renderEmployees, favorites:renderFavorites,
+    import:renderImport, export:renderExport };
+  if (renders[page]) renders[page]();
+  else if (page==='employee') renderProfile(params.id);
   window.location.hash = page;
 }
 
 function handleHash() {
-  const hash = window.location.hash.slice(1);
-  // Handle ?user=xxx
   const uParam = new URLSearchParams(window.location.search).get('user');
-  if (uParam) {
-    const emp = S.data.find(e => e.id === uParam || e.name.toLowerCase().includes(uParam.toLowerCase()));
-    if (emp) { navigate('employee', { id: emp.id }); return; }
+  if (uParam && S.data.length) {
+    const emp = S.data.find(e => e.name.toLowerCase().includes(uParam.toLowerCase()));
+    if (emp) { navigate('employee', { id: emp.name }); return; }
   }
-  if (hash && PAGE_LABELS[hash]) navigate(hash);
-  else navigate('dashboard');
+  const h = window.location.hash.slice(1);
+  navigate(PAGE_LABELS[h] ? h : 'dashboard');
 }
 
-// ═══════════════════ FILTERS HELPERS ═════════════
+// ═══════════════════ HELPERS ═════════════════════
 
-function getUnique(arr, key) {
-  return [...new Set(arr.map(e => e[key]))].filter(Boolean).sort();
+function getScheduleOn(emp, d=S.date) {
+  return (emp.schedule||{})[dateKey(d)] || { status:'off' };
 }
 
-function populateSelect(id, values, currentVal='') {
-  const s = el(id);
-  if (!s) return;
-  const firstOpt = s.options[0];
-  s.innerHTML = '';
-  s.appendChild(firstOpt);
-  values.forEach(v => {
-    const o = document.createElement('option');
-    o.value = v; o.textContent = v;
-    if (v === currentVal) o.selected = true;
-    s.appendChild(o);
+function getBreaksFor(empName) {
+  // Fuzzy match: names may be truncated in file 1
+  const norm = n => (n||'').toLowerCase().replace(/\s+/g,' ').trim();
+  const en = norm(empName);
+  return S.breaks.find(b => {
+    const bn = norm(b.name);
+    return bn === en || en.startsWith(bn.substring(0,12)) || bn.startsWith(en.substring(0,12));
   });
 }
 
-function filterData(employees, opts={}) {
-  let data = [...employees];
-  if (opts.dept)   data = data.filter(e => e.dept  === opts.dept);
-  if (opts.sv)     data = data.filter(e => e.sv    === opts.sv);
-  if (opts.shift)  data = data.filter(e => e.shift === opts.shift);
-  if (opts.status) {
-    const dk = dateKey(S.date);
-    data = data.filter(e => (e.schedule[dk]||{}).status === opts.status);
-  }
-  if (opts.search) {
-    const q = opts.search.toLowerCase();
-    data = data.filter(e =>
-      e.name.toLowerCase().includes(q) ||
-      e.dept.toLowerCase().includes(q) ||
-      e.sv.toLowerCase().includes(q) ||
-      e.pos.toLowerCase().includes(q)
-    );
-  }
+function getUniqueVals(arr, key) {
+  return [...new Set(arr.map(e=>e[key]).filter(Boolean))].sort();
+}
+
+function populateSelect(id, vals) {
+  const s = el(id); if (!s) return;
+  const first = s.options[0] ? s.options[0].outerHTML : '';
+  s.innerHTML = first + vals.map(v=>`<option value="${v}">${v}</option>`).join('');
+}
+
+function filterEmps(opts={}) {
+  let data = [...S.data];
+  if (opts.rg)     data = data.filter(e=>e.rg===opts.rg);
+  if (opts.sv)     data = data.filter(e=>e.sv===opts.sv);
+  if (opts.shift)  data = data.filter(e=>e.graphSurv===opts.shift||e.shiftCode===opts.shift);
+  if (opts.status) { const dk=dateKey(S.date); data=data.filter(e=>(e.schedule[dk]||{}).status===opts.status); }
+  if (opts.search) { const q=opts.search.toLowerCase(); data=data.filter(e=>e.name.toLowerCase().includes(q)||e.sv.toLowerCase().includes(q)||(e.rg||'').toLowerCase().includes(q)); }
   return data;
 }
 
-function getScheduleOn(emp, d=S.date) {
-  return emp.schedule[dateKey(d)] || { status: STATUS.OFF };
-}
-
-// ═══════════════════ TIMELINE UTILS ══════════════
-
-function tMinToX(tMin) {
-  return (tMin - TL_START) * TL_PX_MIN;
-}
+// ═══════════════════ TIMELINE ════════════════════
 
 function tStrToX(tStr) {
-  return tMinToX(timeToMin(tStr));
+  const m = timeToMin(tStr);
+  if (m < TL_START) return tStrToX(minToTime(TL_START));
+  return (m - TL_START) * TL_PX_MIN;
 }
 
 function tDurPx(start, end) {
   const s = timeToMin(start);
-  let e = timeToMin(end);
-  if (e < s) e += 24 * 60; // overnight
-  return (e - s) * TL_PX_MIN;
+  let e   = timeToMin(end);
+  if (e < s) e += 24*60; // overnight
+  return Math.max((e - s) * TL_PX_MIN, 4);
 }
 
 function nowX() {
-  const now = new Date();
-  const min = now.getHours() * 60 + now.getMinutes();
-  if (min < TL_START || min > TL_END) return -1;
-  return tMinToX(min);
+  const n = new Date();
+  const m = n.getHours()*60 + n.getMinutes();
+  if (m < TL_START || m > TL_END) return -1;
+  return (m - TL_START) * TL_PX_MIN;
 }
 
 // ═══════════════════ DASHBOARD ═══════════════════
 
 function renderDashboard() {
+  el('dashSubtitle').textContent = formatDisp(S.date);
+
+  if (!S.data.length) {
+    setHTML('dashContent', emptyState('Данные не загружены', 'Импортируйте файл расписания через раздел «Импорт Excel»', '📥'));
+    return;
+  }
+
   const dk = dateKey(S.date);
-  const all = S.data;
+  const rgs = getUniqueVals(S.data,'rg');
+  populateSelect('dashDeptFilter', rgs);
+  const rgF = (el('dashDeptFilter')||{}).value||'';
+  let display = rgF ? S.data.filter(e=>e.rg===rgF) : S.data;
 
-  el('dashSubtitle').textContent = formatDisplayDate(S.date);
-
-  // Stats
-  const stats = { work:0, night:0, changed:0, vacation:0, sick:0, study:0, unpaid:0, absence:0, off:0 };
-  all.forEach(e => {
-    const sc = getScheduleOn(e);
-    const st = sc.status;
-    if (st === STATUS.WORK)     stats.work++;
-    else if (st === STATUS.NIGHT)   stats.night++;
-    else if (st === STATUS.CHANGED) stats.changed++;
-    else if (st === STATUS.VACATION)stats.vacation++;
-    else if (st === STATUS.SICK)    stats.sick++;
-    else if (st === STATUS.STUDY)   stats.study++;
-    else if (st === STATUS.UNPAID)  stats.unpaid++;
-    else if (st === STATUS.ABSENCE) stats.absence++;
-    else stats.off++;
+  const counts = { work:0, night:0, changed:0, vac:0, sick:0, study:0, unpaid:0, absence:0, off:0 };
+  display.forEach(e => {
+    const st = (e.schedule[dk]||{}).status||'off';
+    if (st==='work') counts.work++;
+    else if (st==='21') counts.night++;
+    else if (st==='9')  counts.changed++;
+    else if (st==='ОТ') counts.vac++;
+    else if (st==='БЛ') counts.sick++;
+    else if (st==='УО') counts.study++;
+    else if (st==='ОЗ') counts.unpaid++;
+    else if (st==='НЯ') counts.absence++;
+    else counts.off++;
   });
+  const active = counts.work + counts.night + counts.changed;
 
-  const totalActive = stats.work + stats.night + stats.changed;
-
-  const deptFilter = (el('dashDeptFilter')||{}).value || '';
-  const depts = getUnique(all, 'dept');
-  populateSelect('dashDeptFilter', depts);
-
-  // Dept stats
-  const deptStats = {};
-  DEPARTMENTS.forEach(d => {
-    const empInDept = all.filter(e => e.dept === d);
-    const working = empInDept.filter(e => {
-      const st = getScheduleOn(e).status;
-      return st === STATUS.WORK || st === STATUS.NIGHT || st === STATUS.CHANGED;
-    }).length;
-    deptStats[d] = { total: empInDept.length, working };
-  });
-
-  // Currently working employees (sample)
-  const workingNow = all.filter(e => {
-    const st = getScheduleOn(e).status;
-    return st === STATUS.WORK || st === STATUS.NIGHT || st === STATUS.CHANGED;
-  }).slice(0, 8);
-
-  const notWorking = all.filter(e => {
-    const st = getScheduleOn(e).status;
-    return st !== STATUS.WORK && st !== STATUS.NIGHT && st !== STATUS.CHANGED && st !== STATUS.OFF;
-  }).slice(0, 6);
-
-  const statsCards = [
-    { icon:'👥', label:'Всего сотрудников', value: all.length, meta:'в системе', color: '#3b82f6' },
-    { icon:'✅', label:'Работают сегодня', value: totalActive, meta:`из ${all.length}`, color: '#10b981' },
-    { icon:'🌙', label:'Ночная смена', value: stats.night, meta:'сотрудников', color: '#8b5cf6' },
-    { icon:'🔄', label:'Изм. смены', value: stats.changed, meta:'сотрудников', color: '#10b981' },
-    { icon:'🏖️', label:'В отпуске', value: stats.vacation, meta:'сотрудников', color: '#64748b' },
-    { icon:'🤒', label:'На больничном', value: stats.sick, meta:'сотрудников', color: '#ef4444' },
-    { icon:'📚', label:'Учебный отпуск', value: stats.study, meta:'сотрудников', color: '#06b6d4' },
-    { icon:'⚠️', label:'Неявка', value: stats.absence, meta:'сотрудников', color: '#dc2626' },
+  const cards = [
+    { icon:'👥', label:'Всего в системе', v: display.length, color:'#3b82f6', meta:'' },
+    { icon:'✅', label:'Работают',         v: active,         color:'#10b981', meta:`из ${display.length}` },
+    { icon:'🌙', label:'Ночная смена',     v: counts.night,   color:'#8b5cf6', meta:'' },
+    { icon:'🔄', label:'Изм. смены',       v: counts.changed, color:'#10b981', meta:'' },
+    { icon:'🏖️', label:'Отпуск',           v: counts.vac,     color:'#64748b', meta:'' },
+    { icon:'🤒', label:'Больничный',       v: counts.sick,    color:'#ef4444', meta:'' },
+    { icon:'📚', label:'Уч. отпуск',       v: counts.study,   color:'#06b6d4', meta:'' },
+    { icon:'⚠️', label:'Неявка',           v: counts.absence, color:'#dc2626', meta:'' },
   ];
 
-  const statsHTML = `
-    <div class="stats-grid">
-      ${statsCards.map(c => `
-        <div class="stat-card">
-          <div class="stat-card-icon" style="background:${c.color}18;">${c.icon}</div>
-          <div class="stat-card-label">${c.label}</div>
-          <div class="stat-card-value" style="color:${c.color};">${c.value}</div>
-          <div class="stat-card-meta">${c.meta}</div>
-        </div>
-      `).join('')}
-    </div>
-  `;
+  const statsHTML = `<div class="stats-grid">${
+    cards.map(c=>`<div class="stat-card">
+      <div class="stat-card-icon" style="background:${c.color}18;">${c.icon}</div>
+      <div class="stat-card-label">${c.label}</div>
+      <div class="stat-card-value" style="color:${c.color};">${c.v}</div>
+      ${c.meta?`<div class="stat-card-meta">${c.meta}</div>`:''}
+    </div>`).join('')
+  }</div>`;
 
-  // Working employees list
-  const workingListHTML = `
-    <div class="card">
-      <div class="card-header"><span class="card-title">✅ Работают сегодня (${totalActive})</span></div>
-      <div class="card-body">
-        ${workingNow.length ? workingNow.map(e => {
-          const sc = getScheduleOn(e);
-          const col = e.color;
-          return `
-            <div class="employee-row" onclick="navigate('employee',{id:'${e.id}'})" style="cursor:pointer;">
-              ${makeAvatar(e.name, col, 36)}
-              <div class="emp-info">
-                <div class="emp-name">${e.name}</div>
-                <div class="emp-meta">${e.dept} · СВ: ${e.sv.split(' ')[0]}</div>
-              </div>
-              <div class="emp-badge">${badge(sc.status)}</div>
-            </div>
-          `;
-        }).join('') : '<div class="empty-state"><div class="empty-state-text">Нет данных</div></div>'}
-      </div>
-    </div>
-  `;
+  // Working list
+  const working = display.filter(e => {
+    const st=(e.schedule[dk]||{}).status||'off';
+    return st==='work'||st==='21'||st==='9';
+  });
+  const notWorking = display.filter(e => {
+    const st=(e.schedule[dk]||{}).status||'off';
+    return st!=='work'&&st!=='21'&&st!=='9'&&st!=='off';
+  });
 
-  // Not working list
-  const notWorkingHTML = `
-    <div class="card">
-      <div class="card-header"><span class="card-title">⏸ Не работают</span></div>
-      <div class="card-body">
-        ${notWorking.length ? notWorking.map(e => {
-          const sc = getScheduleOn(e);
-          return `
-            <div class="employee-row" onclick="navigate('employee',{id:'${e.id}'})" style="cursor:pointer;">
-              ${makeAvatar(e.name, e.color, 36)}
-              <div class="emp-info">
-                <div class="emp-name">${e.name}</div>
-                <div class="emp-meta">${e.dept}</div>
-              </div>
-              <div class="emp-badge">${badge(sc.status)}</div>
-            </div>
-          `;
-        }).join('') : '<div class="empty-state-text txt-secondary txt-sm" style="padding:16px 0;">Все сотрудники работают</div>'}
+  function empRow(e) {
+    const sc = e.schedule[dk]||{status:'off'};
+    return `<div class="emp-row" onclick="navigate('employee',{id:'${e.name}'})">
+      ${avatarHTML(e.name, e.color||'#3b82f6', 36)}
+      <div class="emp-info">
+        <div class="emp-name">${e.name}</div>
+        <div class="emp-meta">${e.rg||''} · СВ: ${(e.sv||'').split(' ')[0]}</div>
       </div>
-    </div>
-  `;
+      ${badge(sc.status)}
+    </div>`;
+  }
 
-  // Department analytics
-  const deptAnalytics = `
-    <div class="card">
-      <div class="card-header"><span class="card-title">📊 Аналитика по отделам</span></div>
-      <div class="card-body">
-        <div class="mini-bar-wrap">
-          ${DEPARTMENTS.map(d => {
-            const ds = deptStats[d];
-            const pct = ds.total ? Math.round(ds.working/ds.total*100) : 0;
-            return `
-              <div class="mini-bar-row">
-                <span class="mini-bar-label" title="${d}">${d.split(' ')[0]}</span>
-                <div class="mini-bar-track">
-                  <div class="mini-bar-fill" style="width:${pct}%;background:var(--primary);"></div>
-                </div>
-                <span class="mini-bar-count">${ds.working}/${ds.total}</span>
-              </div>
-            `;
-          }).join('')}
-        </div>
-        <div class="divider"></div>
-        ${DEPARTMENTS.map(d => `
-          <div class="mini-bar-row" style="margin-bottom:4px;">
-            <span style="font-size:.82rem;font-weight:600;">${d}</span>
-          </div>
-          ${SUPERVISORS.filter(sv=>sv.dept===d).map(sv => {
-            const svEmps = all.filter(e => e.sv === sv.name);
-            const svWork = svEmps.filter(e => {
-              const st = getScheduleOn(e).status;
-              return st === STATUS.WORK || st === STATUS.NIGHT || st === STATUS.CHANGED;
-            }).length;
-            return `<div class="mini-bar-row" style="padding-left:12px;margin-bottom:2px;">
-              <span class="mini-bar-label txt-sm">${sv.name.split(' ')[0]}</span>
-              <div class="mini-bar-track">
-                <div class="mini-bar-fill" style="width:${svEmps.length?svWork/svEmps.length*100:0}%;background:var(--c-changed);"></div>
-              </div>
-              <span class="mini-bar-count">${svWork}/${svEmps.length}</span>
-            </div>`;
-          }).join('')}
-        `).join('<div class="divider" style="margin:10px 0;"></div>')}
-      </div>
-    </div>
-  `;
+  // RG analytics
+  const rgStats = rgs.map(rg => {
+    const g = S.data.filter(e=>e.rg===rg);
+    const w = g.filter(e=>{ const st=(e.schedule[dk]||{}).status||'off'; return st==='work'||st==='21'||st==='9'; }).length;
+    return { rg, total:g.length, working:w };
+  });
 
   setHTML('dashContent', `
     ${statsHTML}
     <div class="dash-grid">
       <div class="dash-col">
-        ${workingListHTML}
+        <div class="card">
+          <div class="card-hdr"><span class="card-title">✅ Работают (${working.length})</span></div>
+          <div class="card-body">
+            ${working.length ? working.slice(0,10).map(empRow).join('') : '<div class="txt-muted" style="padding:12px 0;">Все сотрудники отдыхают</div>'}
+            ${working.length>10?`<div class="txt-muted txt-sm" style="padding:8px 0;">… ещё ${working.length-10}</div>`:''}
+          </div>
+        </div>
       </div>
       <div class="dash-col">
-        ${notWorkingHTML}
-        ${deptAnalytics}
+        ${notWorking.length ? `<div class="card">
+          <div class="card-hdr"><span class="card-title">⏸ Не работают (${notWorking.length})</span></div>
+          <div class="card-body">${notWorking.slice(0,8).map(empRow).join('')}</div>
+        </div>` : ''}
+        <div class="card">
+          <div class="card-hdr"><span class="card-title">📊 По группам</span></div>
+          <div class="card-body">
+            <div class="mini-bars">${rgStats.map(({rg,total,working:w})=>{
+              const pct = total ? Math.round(w/total*100) : 0;
+              return `<div class="mini-bar-row">
+                <span class="mini-bar-label" title="${rg}">${rg}</span>
+                <div class="mini-bar-track"><div class="mini-bar-fill" style="width:${pct}%;"></div></div>
+                <span class="mini-bar-num">${w}/${total}</span>
+              </div>`;
+            }).join('')}</div>
+          </div>
+        </div>
       </div>
     </div>
   `);
@@ -713,689 +826,631 @@ function renderDashboard() {
 // ═══════════════════ TIMELINE ════════════════════
 
 function renderTimeline() {
-  el('timelineSubtitle').textContent = formatDisplayDate(S.date);
+  el('timelineSubtitle').textContent = formatDisp(S.date);
 
-  const depts = getUnique(S.data, 'dept');
-  const svs   = getUnique(S.data, 'sv');
-  populateSelect('tlDeptFilter', depts);
+  if (!S.data.length) {
+    setHTML('timelineContent', emptyState('Данные не загружены', 'Импортируйте файл расписания', '📥'));
+    return;
+  }
+
+  const rgs   = getUniqueVals(S.data,'rg');
+  const svs   = getUniqueVals(S.data,'sv');
+  populateSelect('tlRGFilter', rgs);
   populateSelect('tlSVFilter', svs);
 
-  const dept  = (el('tlDeptFilter')||{}).value || '';
-  const sv    = (el('tlSVFilter')||{}).value || '';
-  const shift = (el('tlShiftFilter')||{}).value || '';
+  const rgF    = (el('tlRGFilter')||{}).value||'';
+  const svF    = (el('tlSVFilter')||{}).value||'';
+  const shiftF = (el('tlShiftFilter')||{}).value||'';
 
-  let filtered = filterData(S.data, { dept, sv, shift });
+  let filtered = filterEmps({ rg:rgF, sv:svF, shift:shiftF });
+  filtered = filtered.filter(e => (e.schedule[dateKey(S.date)]||{}).status !== 'off');
 
-  // Remove employees who are off
-  filtered = filtered.filter(e => {
-    const sc = getScheduleOn(e);
-    return sc.status !== STATUS.OFF;
-  });
-
-  // Hours to show: 06–23
   const hours = [];
-  for (let h = 6; h <= 23; h++) hours.push(h);
-  const now = new Date();
-  const nowHour = now.getHours();
-  const nowX_px = nowX();
-  const isTodayView = sameDay(S.date, new Date());
+  for (let h=8; h<=22; h++) hours.push(h);
+  const isToday_ = sameDay(S.date, new Date());
+  const nx = nowX();
 
-  const timeAxisHTML = hours.map(h => `
-    <div class="tl-hour${isTodayView && h === nowHour ? ' current-hour' : ''}">${String(h).padStart(2,'0')}:00</div>
-  `).join('');
+  const axisHTML = hours.map(h=>`<div class="tl-hour${isToday_&&h===new Date().getHours()?' tl-hour-now':''}">${pad(h)}:00</div>`).join('');
 
-  // Group by dept
-  const grouped = {};
-  DEPARTMENTS.forEach(d => {
-    const emps = filtered.filter(e => e.dept === d);
-    if (emps.length) grouped[d] = emps;
-  });
+  const gridLines = hours.map(()=>`<div class="tl-grid-line"></div>`).join('');
 
-  const gridLines = hours.map(() => `<div class="tl-grid-line"></div>`).join('');
+  function buildBlock(sc, brk) {
+    let html = '';
+    if (!sc) return html;
 
-  const nowLineHTML = (isTodayView && nowX_px >= 0) ? `
-    <div class="tl-now-line" style="left:${nowX_px}px;" id="tlNowLine">
-      <div class="tl-now-dot"></div>
-      <div class="tl-now-label">${minToTime(now.getHours()*60+now.getMinutes())}</div>
-    </div>
-  ` : '';
+    const isWork   = sc.status==='work'||sc.status==='9';
+    const isNight  = sc.status==='21';
+    const isLeave  = ['ОТ','БЛ','УО','ОЗ','НЯ'].includes(sc.status);
 
-  function buildRow(e) {
-    const sc = getScheduleOn(e);
-    const col = e.color;
-    const initials = e.name.split(' ').slice(0,2).map(w=>w[0]).join('');
+    if (isWork || isNight) {
+      const x = tStrToX(sc.shiftStart||'09:00');
+      const w = tDurPx(sc.shiftStart||'09:00', sc.shiftEnd||'18:00');
+      const cls = isNight ? 'tl-b-night' : (sc.status==='9'?'tl-b-changed':'tl-b-work');
+      const label = w > 80 ? `${sc.shiftStart}–${sc.shiftEnd}` : '';
+      html += `<div class="tl-block ${cls}" style="left:${x}px;width:${w}px;" data-tip="${STATUS_LABEL[sc.status]}|${sc.shiftStart}–${sc.shiftEnd}">${label}</div>`;
 
-    let blocksHTML = '';
-
-    if (sc.status === STATUS.WORK || sc.status === STATUS.NIGHT || sc.status === STATUS.CHANGED) {
-      const clsMap = { work:'work', '21':'night', '9':'changed' };
-      const bCls = clsMap[sc.status] || 'work';
-      const x = tStrToX(sc.shiftStart);
-      const w = tDurPx(sc.shiftStart, sc.shiftEnd);
-      const label = `${sc.shiftStart}–${sc.shiftEnd}`;
-
-      blocksHTML += `
-        <div class="tl-block tl-block-${bCls}"
-          style="left:${x}px;width:${w}px;"
-          data-tip="${e.name}|${STATUS_LABEL[sc.status]}|${label}"
-          onclick="showEmpModal('${e.id}')">
-          ${w > 80 ? label : ''}
-        </div>`;
-
-      // Breaks
-      (sc.breaks||[]).forEach(br => {
-        const bx = tStrToX(br.start);
-        const bw = tDurPx(br.start, br.end);
-        const isl = br.type === 'lunch';
-        blocksHTML += `
-          <div class="tl-block tl-block-${isl?'lunch':'break'}"
-            style="left:${bx}px;width:${Math.max(bw,6)}px;"
-            data-tip="${e.name}|${isl?'Обед':'Перерыв'}|${br.start}–${br.end}">
-            ${bw > 50 ? (isl?'🍽':'☕') : ''}
-          </div>`;
-      });
-    } else if (sc.status !== STATUS.OFF) {
-      // Vacation, sick, etc — full-day block
-      blocksHTML += `
-        <div class="tl-block tl-block-${sc.status==='БЛ'?'sick':sc.status==='ОТ'?'vacation':'absence'}"
-          style="left:0;width:${TL_TOTAL*TL_PX_MIN}px;"
-          data-tip="${e.name}|${STATUS_LABEL[sc.status]}|весь день"
-          onclick="showEmpModal('${e.id}')">
-          ${STATUS_LABEL[sc.status]}
-        </div>`;
+      // Breaks from file 2 if available, else lunch from schedule
+      if (brk && brk.breaks && brk.breaks.length) {
+        brk.breaks.forEach(b => {
+          const bx = tStrToX(b.start);
+          const bw = tDurPx(b.start, b.end);
+          if (bx < 0) return;
+          const col = BREAK_COLORS[b.type]||'#f59e0b';
+          const icon = b.type==='обед'?'🍽':b.type==='ужин'?'🌙':'☕';
+          html += `<div class="tl-block tl-b-break" style="left:${bx}px;width:${Math.max(bw,6)}px;background:${col};" data-tip="${b.type}|${b.start}–${b.end}">${bw>30?icon:''}</div>`;
+        });
+      } else if (sc.lunchHour) {
+        const lx = tStrToX(`${pad(sc.lunchHour)}:00`);
+        html += `<div class="tl-block tl-b-break" style="left:${lx}px;width:${60*TL_PX_MIN}px;background:#f97316;" data-tip="Обед|${pad(sc.lunchHour)}:00–${pad(sc.lunchHour+1)}:00">🍽</div>`;
+      }
+    } else if (isLeave) {
+      const TL_W = (TL_END-TL_START)*TL_PX_MIN;
+      const colMap = {ОТ:'#64748b',БЛ:'#ef4444',УО:'#06b6d4',ОЗ:'#f97316',НЯ:'#dc2626'};
+      const col = colMap[sc.status]||'#94a3b8';
+      html += `<div class="tl-block" style="left:0;width:${TL_W}px;background:${col}18;color:${col};border:1px dashed ${col};" data-tip="${STATUS_LABEL[sc.status]}|весь день">${STATUS_LABEL[sc.status]}</div>`;
     }
-
-    return `
-      <div class="timeline-row">
-        <div class="tl-emp-cell" onclick="navigate('employee',{id:'${e.id}'})">
-          <div class="tl-emp-avatar" style="background:${col}20;color:${col};">${initials}</div>
-          <div>
-            <div class="tl-emp-name">${e.name.split(' ')[0]} ${e.name.split(' ')[1]||''}</div>
-            <div class="tl-emp-meta">Смена ${e.shift} · ${e.sv.split(' ')[0]}</div>
-          </div>
-        </div>
-        <div class="tl-blocks-cell" style="width:${TL_TOTAL*TL_PX_MIN}px;">
-          <div class="tl-grid-lines">${gridLines}</div>
-          ${blocksHTML}
-          ${(isTodayView && nowX_px >= 0) ? `<div class="tl-now-line" style="left:${nowX_px}px;"></div>` : ''}
-        </div>
-      </div>
-    `;
+    return html;
   }
 
-  const groupsHTML = Object.entries(grouped).map(([dName, emps]) => `
-    <div class="timeline-group" data-dept="${dName}">
-      <div class="timeline-group-header" onclick="toggleGroup(this)">
-        <span class="tl-collapse-icon">▼</span>
-        <span>${dName}</span>
-        <span style="margin-left:auto;font-size:.75rem;color:var(--txt-3);">${emps.length} чел.</span>
+  // Group by RG
+  const groupMap = {};
+  filtered.forEach(e => {
+    const g = e.rg || 'Без группы';
+    if (!groupMap[g]) groupMap[g] = [];
+    groupMap[g].push(e);
+  });
+
+  const TL_W = (TL_END - TL_START) * TL_PX_MIN;
+
+  const rowsHTML = Object.entries(groupMap).map(([grp, emps]) => `
+    <div class="tl-group">
+      <div class="tl-group-hdr" onclick="this.parentElement.classList.toggle('tl-collapsed')">
+        <span class="tl-collapse-ico">▼</span>
+        <span>${grp}</span>
+        <span class="tl-group-count">${emps.length} чел.</span>
       </div>
       <div class="tl-group-rows">
-        ${emps.map(e => buildRow(e)).join('')}
+        ${emps.map(e => {
+          const sc  = getScheduleOn(e);
+          const brk = getBreaksFor(e.name);
+          const ini = e.name.split(' ').slice(0,2).map(w=>w[0]).join('');
+          return `<div class="tl-row">
+            <div class="tl-emp-cell" onclick="navigate('employee',{id:'${e.name}'})">
+              <div class="tl-emp-ava" style="background:${e.color}22;color:${e.color};">${ini}</div>
+              <div>
+                <div class="tl-emp-name">${e.name.split(' ').slice(0,2).join(' ')}</div>
+                <div class="tl-emp-meta">${e.graphSurv||''}</div>
+              </div>
+            </div>
+            <div class="tl-blocks-wrap" style="width:${TL_W}px;">
+              <div class="tl-grid-lines">${gridLines}</div>
+              ${buildBlock(sc, brk)}
+              ${isToday_&&nx>=0?`<div class="tl-now-line" style="left:${nx}px;"></div>`:''}
+            </div>
+          </div>`;
+        }).join('')}
       </div>
     </div>
   `).join('');
 
-  const totalWidth = TL_TOTAL * TL_PX_MIN + 200;
+  const nowLineHeader = isToday_&&nx>=0 ? `<div class="tl-now-line tl-now-header" style="left:${nx+200}px;"><div class="tl-now-dot"></div><div class="tl-now-lbl">${minToTime(new Date().getHours()*60+new Date().getMinutes())}</div></div>` : '';
 
   setHTML('timelineContent', `
-    <div class="timeline-wrap" id="tlWrap">
-      <div class="timeline-scroll" id="tlScroll">
-        <div class="timeline-inner" style="width:${totalWidth}px;">
-          <div class="timeline-header">
-            <div class="tl-name-col">Сотрудник</div>
-            <div class="tl-time-axis">${timeAxisHTML}</div>
+    <div class="tl-wrap" id="tlWrap">
+      <div class="tl-scroll" id="tlScroll">
+        <div style="min-width:${TL_W+200}px;position:relative;">
+          <div class="tl-header">
+            <div class="tl-name-hdr">Сотрудник</div>
+            <div class="tl-axis">${axisHTML}</div>
           </div>
-          ${groupsHTML || '<div class="empty-state"><div class="empty-state-icon">📅</div><div class="empty-state-text">Нет сотрудников за выбранный день</div></div>'}
+          ${rowsHTML || emptyState('Нет работающих сотрудников за этот день', '', '📅')}
         </div>
       </div>
     </div>
-    ${nowLineHTML ? '' : ''}
   `);
 
-  // Tooltip
-  initTimelineTooltip();
+  initTooltips();
 
-  // Auto-scroll to now if today
-  if (isTodayView && nowX_px > 0) {
+  // Auto-scroll to now
+  if (isToday_ && nx > 0) {
     setTimeout(() => {
-      const scr = el('tlScroll');
-      if (scr) scr.scrollLeft = Math.max(0, nowX_px - 200);
-    }, 100);
+      const s = el('tlScroll');
+      if (s) s.scrollLeft = Math.max(0, nx - 200);
+    }, 80);
   }
 }
 
-function toggleGroup(header) {
-  const group = header.parentElement;
-  const rows = qs('.tl-group-rows', group);
-  const icon = qs('.tl-collapse-icon', header);
-  const collapsed = rows.style.display === 'none';
-  rows.style.display = collapsed ? '' : 'none';
-  icon.textContent = collapsed ? '▼' : '▶';
-}
-
-function initTimelineTooltip() {
-  // Create tooltip if not exists
-  let tip = el('tlTooltipEl');
+function initTooltips() {
+  let tip = el('tlTip');
   if (!tip) {
-    tip = html('div', { id: 'tlTooltipEl', class: 'tl-tooltip' });
+    tip = document.createElement('div');
+    tip.id = 'tlTip';
+    tip.className = 'tl-tooltip';
     document.body.appendChild(tip);
   }
-
-  document.addEventListener('mousemove', onTipMove);
-
-  qsa('[data-tip]').forEach(block => {
-    block.addEventListener('mouseenter', function(ev) {
-      const parts = this.dataset.tip.split('|');
-      tip.innerHTML = `<strong>${parts[0]}</strong>${parts[1]}<br><span style="opacity:.7">${parts[2]}</span>`;
-      tip.classList.add('show');
-    });
-    block.addEventListener('mouseleave', () => tip.classList.remove('show'));
+  qsa('[data-tip]').forEach(b => {
+    b.onmouseenter = function(ev) {
+      const [a,c] = this.dataset.tip.split('|');
+      tip.innerHTML = `<strong>${a}</strong>${c}`;
+      tip.style.display = 'block';
+    };
+    b.onmouseleave = () => { tip.style.display='none'; };
+    b.onmousemove  = ev => {
+      tip.style.left = (ev.clientX+12)+'px';
+      tip.style.top  = (ev.clientY-40)+'px';
+    };
   });
 }
 
-function onTipMove(ev) {
-  const tip = el('tlTooltipEl');
-  if (!tip || !tip.classList.contains('show')) return;
-  tip.style.left = (ev.clientX + 12) + 'px';
-  tip.style.top  = (ev.clientY - 40) + 'px';
-}
+// ═══════════════════ BREAKS PAGE ═════════════════
 
-function scrollToNow() {
-  const scr = el('tlScroll');
-  if (!scr) return;
-  const nx = nowX();
-  if (nx >= 0) scr.scrollLeft = Math.max(0, nx - 200);
-}
+function renderBreaksPage() {
+  const dk = dateKey(S.date);
+  el('breaksSubtitle') && (el('breaksSubtitle').textContent = formatDisp(S.date));
 
-// ═══════════════════ BREAKS ══════════════════════
+  if (!S.breaks.length && !S.data.length) {
+    setHTML('breaksContent', emptyState('Данные не загружены', 'Импортируйте файл перерывов', '☕'));
+    return;
+  }
 
-function renderBreaks() {
-  el('breaksSubtitle') && (el('breaksSubtitle').textContent = formatDisplayDate(S.date));
-
-  const depts = getUnique(S.data, 'dept');
-  const svs   = getUnique(S.data, 'sv');
-  populateSelect('brkDeptFilter', depts);
+  const rgs = getUniqueVals(S.data,'rg');
+  const svs = getUniqueVals(S.data,'sv');
+  populateSelect('brkRGFilter', rgs);
   populateSelect('brkSVFilter', svs);
 
-  const dept  = (el('brkDeptFilter')||{}).value || '';
-  const sv    = (el('brkSVFilter')||{}).value || '';
+  const rgF = (el('brkRGFilter')||{}).value||'';
+  const svF = (el('brkSVFilter')||{}).value||'';
 
-  let filtered = filterData(S.data, { dept, sv });
-  filtered = filtered.filter(e => {
-    const sc = getScheduleOn(e);
-    return (sc.status === STATUS.WORK || sc.status === STATUS.CHANGED) && sc.breaks;
-  });
+  // Build display list: prefer breaks file data, supplement with schedule data
+  const display = [];
 
-  const TL_W = TL_TOTAL * TL_PX_MIN;
-
-  function segStyle(tStr, endStr, color, opacity=1) {
-    const x = tStrToX(tStr);
-    const w = tDurPx(tStr, endStr);
-    return `left:${x}px;width:${w}px;background:${color};opacity:${opacity};`;
+  if (S.breaks.length) {
+    let brkList = [...S.breaks];
+    // Filter by sv if needed
+    if (svF) brkList = brkList.filter(b => b.sv === svF);
+    if (rgF) {
+      const rgEmps = S.data.filter(e=>e.rg===rgF).map(e=>e.name);
+      brkList = brkList.filter(b => rgEmps.some(n => n.startsWith(b.name.substring(0,12)) || b.name.startsWith(n.substring(0,12))));
+    }
+    brkList.forEach(b => display.push(b));
+  } else {
+    // Fallback: show schedule breaks
+    let emps = filterEmps({ rg:rgF, sv:svF });
+    emps = emps.filter(e => {
+      const sc = getScheduleOn(e);
+      return (sc.status==='work'||sc.status==='9') && sc.lunchHour;
+    });
+    emps.forEach(e => {
+      const sc = getScheduleOn(e);
+      display.push({
+        name: e.name,
+        shift: `${sc.shiftStart}–${sc.shiftEnd}`,
+        sv: e.sv,
+        breaks: sc.lunchHour ? [{ start:`${pad(sc.lunchHour)}:00`, end:`${pad(sc.lunchHour+1)}:00`, type:'обед' }] : [],
+      });
+    });
   }
 
-  const rowsHTML = filtered.map(e => {
-    const sc = getScheduleOn(e);
-    const col = e.color;
-    const initials = e.name.split(' ').slice(0,2).map(w=>w[0]).join('');
+  const TL_W  = (TL_END - TL_START) * TL_PX_MIN;
+  const hours = [];
+  for (let h=8;h<=22;h++) hours.push(h);
+  const axisHTML = hours.map(h=>`<span class="brk-time-tick" style="left:${(h*60-TL_START)*TL_PX_MIN}px;">${pad(h)}:00</span>`).join('');
 
-    const brk = sc.breaks || [];
-    const breakSegs = brk.map(b => {
-      const c = b.type === 'lunch' ? 'var(--c-lunch)' : 'var(--c-break)';
-      return `<div class="brk-segment" style="${segStyle(b.start, b.end, c)}" title="${b.type==='lunch'?'Обед':'Перерыв'}: ${b.start}–${b.end}"></div>`;
+  const isToday_= sameDay(S.date, new Date());
+  const nx = nowX();
+
+  const rowsHTML = display.map(b => {
+    const emp = S.data.find(e=>e.name.startsWith(b.name.substring(0,12))||b.name.startsWith(e.name.substring(0,12)));
+    const col  = emp ? emp.color : '#3b82f6';
+
+    // shift bar background
+    let shiftBarHTML = '';
+    if (b.shift && b.shift.includes('–')) {
+      const [sh,se] = b.shift.split('–');
+      const sx = tStrToX(sh.trim()||'08:00');
+      const sw = tDurPx(sh.trim()||'08:00', se.trim()||'20:00');
+      shiftBarHTML = `<div style="position:absolute;top:50%;transform:translateY(-50%);height:6px;border-radius:3px;background:${col}25;left:${sx}px;width:${sw}px;"></div>`;
+    }
+
+    const breakSegs = (b.breaks||[]).map(br => {
+      const bx = tStrToX(br.start);
+      const bw = tDurPx(br.start, br.end);
+      const bc = BREAK_COLORS[br.type]||'#f59e0b';
+      return `<div class="brk-seg" style="left:${bx}px;width:${Math.max(bw,6)}px;background:${bc};" title="${br.type}: ${br.start}–${br.end}" onclick="showBreakEdit('${b.name}','${br.start}','${br.end}','${br.type}')"></div>`;
     }).join('');
 
-    const bgW = tDurPx(sc.shiftStart, sc.shiftEnd);
-    const bgX = tStrToX(sc.shiftStart);
-
-    return `
-      <div class="brk-row">
-        <div class="brk-emp-info">
-          <div class="brk-emp-name">${e.name.split(' ')[0]} ${(e.name.split(' ')[1]||'').charAt(0)}.</div>
-          <div class="brk-emp-sv">СВ: ${e.sv.split(' ')[0]}</div>
-        </div>
-        <div class="brk-track" style="width:${TL_W}px;">
-          <div class="brk-bg-bar" style="left:${bgX}px;width:${bgW}px;"></div>
-          ${breakSegs}
-        </div>
+    return `<div class="brk-row">
+      <div class="brk-emp-info">
+        <div class="brk-emp-name">${b.name.split(' ').slice(0,2).join(' ')}</div>
+        <div class="brk-emp-sv">${b.sv||''}</div>
+        <div class="brk-emp-shift txt-sm txt-muted">${b.shift||''}</div>
       </div>
-    `;
+      <div class="brk-track" style="width:${TL_W}px;">
+        ${shiftBarHTML}
+        ${breakSegs}
+        ${isToday_&&nx>=0?`<div class="tl-now-line" style="left:${nx}px;height:100%;"></div>`:''}
+      </div>
+    </div>`;
   }).join('');
 
-  // Time axis
-  const axisHTML = [];
-  for (let h = 6; h <= 23; h++) {
-    const x = tMinToX(h*60);
-    axisHTML.push(`<span class="brk-time-label" style="left:${x}px;">${String(h).padStart(2,'0')}:00</span>`);
-  }
-
   setHTML('breaksContent', `
-    <div class="card">
-      <div class="card-header">
-        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-          <span class="card-title">График перерывов</span>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;">
-            <span style="display:flex;align-items:center;gap:4px;font-size:.8rem;">
-              <span style="width:14px;height:8px;border-radius:3px;background:var(--c-break);display:inline-block;"></span> Перерыв (15 мин)
-            </span>
-            <span style="display:flex;align-items:center;gap:4px;font-size:.8rem;">
-              <span style="width:14px;height:8px;border-radius:3px;background:var(--c-lunch);display:inline-block;"></span> Обед (60 мин)
-            </span>
-          </div>
+    <div class="card" id="breaksCard">
+      <div class="card-hdr">
+        <span class="card-title">График перерывов — ${display.length} сотрудников</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${Object.entries(BREAK_COLORS).map(([t,c])=>`<span style="display:flex;align-items:center;gap:4px;font-size:.78rem;"><span style="width:12px;height:12px;border-radius:3px;background:${c};display:inline-block;"></span>${t}</span>`).join('')}
         </div>
       </div>
       <div class="card-body" style="overflow-x:auto;">
-        <div style="min-width:${TL_TOTAL*TL_PX_MIN+200}px;position:relative;">
-          <div style="display:flex;align-items:center;margin-bottom:4px;">
-            <div style="width:180px;min-width:180px;"></div>
-            <div style="position:relative;height:20px;flex:1;">
-              ${axisHTML.join('')}
-            </div>
+        <div style="min-width:${TL_W+220}px;">
+          <div style="display:flex;margin-bottom:4px;">
+            <div style="width:220px;min-width:220px;"></div>
+            <div style="position:relative;height:20px;flex:1;">${axisHTML}</div>
           </div>
-          ${rowsHTML || '<div class="empty-state"><div class="empty-state-text">Нет рабочих смен за этот день</div></div>'}
+          ${rowsHTML || emptyState('Нет данных перерывов', 'Импортируйте файл перерывов', '☕')}
         </div>
       </div>
     </div>
   `);
 }
+
+function showBreakEdit(empName, start, end, type) {
+  // Edit break modal
+  const emp = S.breaks.find(b => b.name.startsWith(empName.substring(0,12)) || empName.startsWith(b.name.substring(0,12)));
+  if (!emp) { toast('Сотрудник не найден', 'warning'); return; }
+
+  const breakIdx = emp.breaks.findIndex(b=>b.start===start&&b.type===type);
+
+  openModal(`Перерыв: ${empName.split(' ').slice(0,2).join(' ')}`, `
+    <div class="modal-section">
+      <div class="modal-section-title">Изменить перерыв</div>
+      <div class="form-row">
+        <label>Тип</label>
+        <select id="editBrkType">
+          ${['перерыв','обед','ужин'].map(t=>`<option ${t===type?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Начало</label>
+        <input type="time" id="editBrkStart" value="${start}" />
+      </div>
+      <div class="form-row">
+        <label>Конец</label>
+        <input type="time" id="editBrkEnd" value="${end}" />
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="btn btn-primary" onclick="saveBreakEdit('${empName}',${breakIdx})">Сохранить</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Отмена</button>
+      <button class="btn btn-danger" style="margin-left:auto;" onclick="deleteBreak('${empName}',${breakIdx})">Удалить</button>
+    </div>
+  `);
+}
+
+window.saveBreakEdit = function(empName, idx) {
+  const emp = S.breaks.find(b => b.name.startsWith(empName.substring(0,12)) || empName.startsWith(b.name.substring(0,12)));
+  if (!emp || idx < 0) return;
+  emp.breaks[idx] = {
+    ...emp.breaks[idx],
+    type:  el('editBrkType').value,
+    start: el('editBrkStart').value,
+    end:   el('editBrkEnd').value,
+  };
+  saveBreaks();
+  closeModal();
+  renderBreaksPage();
+  toast('✅ Перерыв сохранён', 'success');
+};
+
+window.deleteBreak = function(empName, idx) {
+  const emp = S.breaks.find(b => b.name.startsWith(empName.substring(0,12)) || empName.startsWith(b.name.substring(0,12)));
+  if (!emp || idx < 0) return;
+  emp.breaks.splice(idx, 1);
+  saveBreaks();
+  closeModal();
+  renderBreaksPage();
+  toast('✅ Перерыв удалён', 'success');
+};
 
 // ═══════════════════ CALENDAR ════════════════════
 
 function renderCalendar() {
-  if (!S.calYear) {
-    S.calYear  = S.date.getFullYear();
-    S.calMonth = S.date.getMonth();
-  }
+  if (S.calYear===null) { S.calYear=S.date.getFullYear(); S.calMonth=S.date.getMonth(); }
 
-  const emps = S.data;
-  populateSelect('calEmpFilter', emps.map(e => e.name));
-  populateSelect('calDeptFilter', getUnique(emps, 'dept'));
+  const rgs = getUniqueVals(S.data,'rg');
+  const emps = S.data.map(e=>e.name).sort();
+  populateSelect('calRGFilter', rgs);
+  populateSelect('calEmpFilter', emps);
 
-  const selEmpName = (el('calEmpFilter')||{}).value || '';
-  const selDept    = (el('calDeptFilter')||{}).value || '';
-  let displayEmps  = emps;
-  if (selEmpName) displayEmps = emps.filter(e => e.name === selEmpName);
-  else if (selDept) displayEmps = emps.filter(e => e.dept === selDept);
+  const selEmp = (el('calEmpFilter')||{}).value||'';
+  const selRG  = (el('calRGFilter')||{}).value||'';
+  let dispEmps = selEmp ? S.data.filter(e=>e.name===selEmp)
+               : selRG  ? S.data.filter(e=>e.rg===selRG)
+               : S.data;
 
-  const y = S.calYear, m = S.calMonth;
-  const firstDay = new Date(y, m, 1).getDay();
-  const daysInMonth = new Date(y, m+1, 0).getDate();
-  const prevMonthDays = new Date(y, m, 0).getDate();
+  const y=S.calYear, m=S.calMonth;
+  const dim = new Date(y,m+1,0).getDate();
+  const firstDow = (new Date(y,m,1).getDay()+6)%7; // Mon=0
+  const prevDim  = new Date(y,m,0).getDate();
 
-  // Calendar header
-  const calNav = `
-    <div class="cal-nav">
-      <button class="btn btn-ghost" onclick="calPrev()">‹ Пред.</button>
-      <h2>${MONTHS_RU[m]} ${y}</h2>
-      <button class="btn btn-ghost" onclick="calNext()">След. ›</button>
-    </div>
-  `;
+  const dayHeaders = DAYS_RU.slice(1).concat(DAYS_RU[0]).map(d=>`<div class="cal-day-hdr">${d}</div>`).join('');
 
-  const dayHeaders = DAYS_RU.map(d => `<div class="cal-day-header">${d}</div>`).join('');
-
-  // Build cells
   const cells = [];
-  const startOffset = (firstDay + 6) % 7; // Mon-first
-  for (let i = 0; i < startOffset; i++) {
-    const d = prevMonthDays - startOffset + i + 1;
-    cells.push({ day: d, month: m-1, year: y, other: true });
-  }
-  for (let d = 1; d <= daysInMonth; d++) {
-    cells.push({ day: d, month: m, year: y, other: false });
-  }
-  const remaining = 42 - cells.length;
-  for (let d = 1; d <= remaining; d++) {
-    cells.push({ day: d, month: m+1, year: y, other: true });
-  }
+  for(let i=0;i<firstDow;i++) cells.push({d:prevDim-firstDow+i+1,m:m-1,y,other:true});
+  for(let d=1;d<=dim;d++) cells.push({d,m,y,other:false});
+  while((cells.length%7)!==0) { const d=cells.length-firstDow-dim+1; cells.push({d,m:m+1,y,other:true}); }
 
-  const today = new Date();
+  const cellsHTML = cells.map(c=>{
+    const date = new Date(c.y,c.m,c.d);
+    const dk   = dateKey(date);
+    const isT  = isToday(date);
+    const isSel= sameDay(date,S.date);
 
-  const cellsHTML = cells.map(c => {
-    const cellDate = new Date(c.year, c.month, c.day);
-    const dk = dateKey(cellDate);
-    const isT = isToday(cellDate);
-    const isSel = sameDay(cellDate, S.date);
+    const evs = dispEmps.slice(0,3).map(e=>{
+      const sc=e.schedule[dk];
+      if(!sc||sc.status==='off') return null;
+      const col=STATUS_COLOR[sc.status]||'#94a3b8';
+      return `<div class="cal-ev" style="background:${col}20;color:${col};">${STATUS_LABEL[sc.status]||sc.status}</div>`;
+    }).filter(Boolean);
 
-    // Collect statuses for this day
-    const events = displayEmps.slice(0, 4).map(e => {
-      const sc = e.schedule[dk];
-      if (!sc || sc.status === STATUS.OFF) return null;
-      return { label: STATUS_LABEL[sc.status] || sc.status, color: STATUS_COLOR[sc.status] || '#94a3b8' };
-    }).filter(Boolean).slice(0,3);
-
-    const evHTML = events.map(ev =>
-      `<div class="cal-event" style="background:${ev.color}20;color:${ev.color};">${ev.label}</div>`
-    ).join('');
-
-    return `
-      <div class="cal-day${c.other?' other-month':''}${isT?' today':''}${isSel&&!isT?' selected':''}"
-        onclick="calDayClick(${c.year},${c.month},${c.day})">
-        <div class="cal-day-num">${c.day}</div>
-        <div class="cal-day-events">${evHTML}</div>
-      </div>
-    `;
+    return `<div class="cal-day${c.other?' cal-day-other':''}${isT?' cal-day-today':''}${isSel&&!isT?' cal-day-sel':''}" onclick="calClick(${c.y},${c.m},${c.d})">
+      <div class="cal-day-num">${c.d}</div>
+      <div class="cal-day-evs">${evs.join('')}</div>
+    </div>`;
   }).join('');
 
-  // Employee month summary (if one selected)
+  // Month summary for selected employee
   let summaryHTML = '';
-  if (selEmpName) {
-    const emp = emps.find(e => e.name === selEmpName);
+  if (selEmp) {
+    const emp = S.data.find(e=>e.name===selEmp);
     if (emp) {
-      const counts = { work:0, night:0, vacation:0, sick:0, off:0, other:0 };
-      for (let d = 1; d <= daysInMonth; d++) {
-        const dk2 = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-        const sc = emp.schedule[dk2] || { status: STATUS.OFF };
-        if (sc.status === STATUS.WORK) counts.work++;
-        else if (sc.status === STATUS.NIGHT) counts.night++;
-        else if (sc.status === STATUS.VACATION) counts.vacation++;
-        else if (sc.status === STATUS.SICK) counts.sick++;
-        else if (sc.status === STATUS.OFF) counts.off++;
-        else counts.other++;
+      const cnt={work:0,night:0,vac:0,sick:0,off:0};
+      for(let d=1;d<=dim;d++){
+        const dk=`${y}-${pad(m+1)}-${pad(d)}`;
+        const sc=emp.schedule[dk]||{status:'off'};
+        if(sc.status==='work'||sc.status==='9') cnt.work++;
+        else if(sc.status==='21') cnt.night++;
+        else if(sc.status==='ОТ') cnt.vac++;
+        else if(sc.status==='БЛ') cnt.sick++;
+        else cnt.off++;
       }
-      summaryHTML = `
-        <div class="card mt-16">
-          <div class="card-header"><span class="card-title">Итоги месяца: ${emp.name}</span></div>
-          <div class="card-body">
-            <div class="stats-grid">
-              <div class="stat-card"><div class="stat-card-label">Рабочих дней</div><div class="stat-card-value" style="color:var(--c-work);">${counts.work}</div></div>
-              <div class="stat-card"><div class="stat-card-label">Ночных смен</div><div class="stat-card-value" style="color:var(--c-night);">${counts.night}</div></div>
-              <div class="stat-card"><div class="stat-card-label">Отпуск</div><div class="stat-card-value" style="color:var(--c-vacation);">${counts.vacation}</div></div>
-              <div class="stat-card"><div class="stat-card-label">Больничный</div><div class="stat-card-value" style="color:var(--c-sick);">${counts.sick}</div></div>
-            </div>
-          </div>
-        </div>
-      `;
+      summaryHTML=`<div class="card" style="margin-top:16px;">
+        <div class="card-hdr"><span class="card-title">Итоги ${MONTHS_NOM[m]} — ${emp.name}</span></div>
+        <div class="card-body"><div class="stats-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
+          <div class="stat-card"><div class="stat-card-label">Рабочих</div><div class="stat-card-value" style="color:var(--c-work);">${cnt.work}</div></div>
+          <div class="stat-card"><div class="stat-card-label">Ночных</div><div class="stat-card-value" style="color:var(--c-night);">${cnt.night}</div></div>
+          <div class="stat-card"><div class="stat-card-label">Отпуск</div><div class="stat-card-value" style="color:var(--c-vac);">${cnt.vac}</div></div>
+          <div class="stat-card"><div class="stat-card-label">Больничный</div><div class="stat-card-value" style="color:var(--c-sick);">${cnt.sick}</div></div>
+        </div></div>
+      </div>`;
     }
   }
 
   setHTML('calendarContent', `
-    ${calNav}
-    <div class="card">
-      <div class="card-body">
-        <div class="cal-grid">
-          ${dayHeaders}
-          ${cellsHTML}
-        </div>
-      </div>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+      <button class="btn btn-ghost" onclick="calNav(-1)">‹ Пред.</button>
+      <h2 style="font-size:1.1rem;font-weight:700;min-width:160px;text-align:center;">${MONTHS_NOM[m]} ${y}</h2>
+      <button class="btn btn-ghost" onclick="calNav(1)">След. ›</button>
     </div>
+    <div class="card"><div class="card-body">
+      <div class="cal-grid">${dayHeaders}${cellsHTML}</div>
+    </div></div>
     ${summaryHTML}
   `);
 }
 
-function calPrev() {
-  S.calMonth--;
-  if (S.calMonth < 0) { S.calMonth = 11; S.calYear--; }
+function calNav(dir) {
+  S.calMonth += dir;
+  if (S.calMonth<0) { S.calMonth=11; S.calYear--; }
+  if (S.calMonth>11){ S.calMonth=0;  S.calYear++; }
   renderCalendar();
 }
-function calNext() {
-  S.calMonth++;
-  if (S.calMonth > 11) { S.calMonth = 0; S.calYear++; }
-  renderCalendar();
-}
-function calDayClick(y, m, d) {
-  S.date = new Date(y, m, d);
+window.calClick = function(y,m,d) {
+  S.date = new Date(y,m,d);
   updateDateDisplay();
   navigate('timeline');
-}
+};
 
 // ═══════════════════ EMPLOYEES ═══════════════════
 
 function renderEmployees() {
-  const depts = getUnique(S.data, 'dept');
-  const svs   = getUnique(S.data, 'sv');
-  populateSelect('empDeptFilter', depts);
-  populateSelect('empSVFilter',   svs);
-
-  filterEmployees();
+  const rgs = getUniqueVals(S.data,'rg');
+  const svs = getUniqueVals(S.data,'sv');
+  populateSelect('empRGFilter', rgs);
+  populateSelect('empSVFilter', svs);
+  applyEmpFilters();
 }
 
-function filterEmployees() {
-  const dept   = (el('empDeptFilter')||{}).value   || '';
-  const sv     = (el('empSVFilter')||{}).value     || '';
-  const shift  = (el('empShiftFilter')||{}).value  || '';
-  const status = (el('empStatusFilter')||{}).value || '';
-  const search = (el('empSearch')||{}).value       || '';
-
-  let data = filterData(S.data, { dept, sv, shift, status, search });
-
-  // Sort
-  data.sort((a, b) => {
-    let va = a[S.sortCol] || '';
-    let vb = b[S.sortCol] || '';
-    if (S.sortCol === 'status') {
-      va = (getScheduleOn(a).status || '');
-      vb = (getScheduleOn(b).status || '');
-    }
-    const cmp = va.localeCompare(vb, 'ru');
-    return S.sortDir === 'asc' ? cmp : -cmp;
+function applyEmpFilters() {
+  const rg     = (el('empRGFilter')||{}).value||'';
+  const sv     = (el('empSVFilter')||{}).value||'';
+  const shift  = (el('empShiftFilter')||{}).value||'';
+  const status = (el('empStatusFilter')||{}).value||'';
+  const search = (el('empSearch')||{}).value||'';
+  let data = filterEmps({ rg, sv, shift, status, search });
+  data.sort((a,b)=>{
+    let va=a[S.sortCol]||'', vb=b[S.sortCol]||'';
+    if(S.sortCol==='status'){va=(a.schedule[dateKey(S.date)]||{}).status||'';vb=(b.schedule[dateKey(S.date)]||{}).status||'';}
+    return (S.sortDir==='asc'?1:-1)*va.localeCompare(vb,'ru');
   });
-
   el('empSubtitle') && (el('empSubtitle').textContent = `${data.length} сотрудников`);
-
-  const dk = dateKey(S.date);
-
-  const rows = data.map(e => {
-    const sc = getScheduleOn(e);
-    const isFav = S.favorites.includes(e.id);
-    return `
-      <tr onclick="navigate('employee',{id:'${e.id}'})">
-        <td>
-          <div style="display:flex;align-items:center;gap:8px;">
-            ${avatarSvg(e.name, e.color)}
-            <span style="font-weight:600;font-size:.88rem;">${e.name}</span>
-          </div>
-        </td>
-        <td>${e.dept}</td>
-        <td>${e.pos}</td>
-        <td>${e.sv}</td>
-        <td><span class="chip">Смена ${e.shift}</span></td>
-        <td>${badge(sc.status)}</td>
-        <td>${sc.shiftStart ? `${sc.shiftStart}–${sc.shiftEnd}` : '—'}</td>
-        <td>
-          <span class="fav-star" style="color:${isFav?'#f59e0b':'var(--border)'};"
-            onclick="event.stopPropagation();toggleFav('${e.id}')">★</span>
-        </td>
-      </tr>
-    `;
-  }).join('');
-
-  function thSort(col, label) {
-    const cls = S.sortCol === col ? ` class="sort-${S.sortDir}"` : '';
-    return `<th${cls} onclick="sortEmployees('${col}')">${label}</th>`;
-  }
-
-  setHTML('empContent', `
-    <div class="emp-table-wrap">
+  const dk=dateKey(S.date);
+  function th(col,lbl){const a=S.sortCol===col;return `<th class="${a?'sort-'+S.sortDir:''}" onclick="sortEmps('${col}')">${lbl}</th>`;}
+  setHTML('empContent',`
+    <div style="overflow-x:auto;border-radius:var(--radius);box-shadow:var(--shadow-sm);">
       <table class="emp-table">
-        <thead>
-          <tr>
-            ${thSort('name',  'ФИО')}
-            ${thSort('dept',  'Отдел')}
-            ${thSort('pos',   'Должность')}
-            ${thSort('sv',    'Супервайзер')}
-            ${thSort('shift', 'Смена')}
-            ${thSort('status','Статус')}
-            <th>Время</th>
-            <th>★</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows || '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--txt-3);">Ничего не найдено</td></tr>'}
-        </tbody>
+        <thead><tr>${th('name','ФИО')}${th('rg','РГ')}${th('sv','Супервайзер')}${th('graphSurv','График')}${th('status','Статус')}
+          <th>Время</th><th>★</th></tr></thead>
+        <tbody>${data.map(e=>{
+          const sc=e.schedule[dk]||{status:'off'};
+          const fav=S.favorites.includes(e.name);
+          return `<tr onclick="navigate('employee',{id:'${e.name}'})">
+            <td><div style="display:flex;align-items:center;gap:8px;">${avatarHTML(e.name,e.color,28)}<span style="font-weight:600;">${e.name}</span></div></td>
+            <td>${e.rg||'—'}</td><td>${e.sv||'—'}</td><td><span class="chip">${e.graphSurv||'—'}</span></td>
+            <td>${badge(sc.status)}</td>
+            <td>${sc.shiftStart?`${sc.shiftStart}–${sc.shiftEnd}`:'—'}</td>
+            <td><span class="fav-star" style="color:${fav?'#f59e0b':'var(--border-color)'};" onclick="event.stopPropagation();toggleFav('${e.name}')">★</span></td>
+          </tr>`;
+        }).join('')||`<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--txt-muted);">Ничего не найдено</td></tr>`}</tbody>
       </table>
     </div>
   `);
 }
 
-function sortEmployees(col) {
-  if (S.sortCol === col) S.sortDir = S.sortDir === 'asc' ? 'desc' : 'asc';
-  else { S.sortCol = col; S.sortDir = 'asc'; }
-  filterEmployees();
-}
+window.sortEmps = function(col) {
+  S.sortDir = S.sortCol===col && S.sortDir==='asc' ? 'desc' : 'asc';
+  S.sortCol = col;
+  applyEmpFilters();
+};
 
-function toggleFav(id) {
-  if (S.favorites.includes(id)) {
-    S.favorites = S.favorites.filter(f => f !== id);
-  } else {
-    S.favorites.push(id);
-  }
+window.toggleFav = function(name) {
+  S.favorites = S.favorites.includes(name) ? S.favorites.filter(f=>f!==name) : [...S.favorites, name];
   savePrefs();
-  filterEmployees();
-}
+  if (S.page==='employees') applyEmpFilters();
+  if (S.page==='favorites') renderFavorites();
+};
 
 // ═══════════════════ FAVORITES ═══════════════════
 
 function renderFavorites() {
-  const favs = S.data.filter(e => S.favorites.includes(e.id));
+  const favs = S.data.filter(e=>S.favorites.includes(e.name));
   if (!favs.length) {
-    setHTML('favContent', `
-      <div class="empty-state">
-        <div class="empty-state-icon">★</div>
-        <div class="empty-state-text">Нет избранных сотрудников</div>
-        <div class="empty-state-sub">Добавьте сотрудников в избранное из таблицы</div>
-      </div>
-    `);
+    setHTML('favContent', emptyState('Нет избранных', 'Добавляйте сотрудников через таблицу — нажмите ★', '★'));
     return;
   }
-
-  setHTML('favContent', `
-    <div class="stats-grid">
-      ${favs.map(e => {
-        const sc = getScheduleOn(e);
-        return `
-          <div class="card hover-card" style="cursor:pointer;" onclick="navigate('employee',{id:'${e.id}'})">
-            <div class="card-body" style="display:flex;align-items:center;gap:12px;">
-              ${makeAvatar(e.name, e.color, 44)}
-              <div style="flex:1;min-width:0;">
-                <div style="font-weight:700;font-size:.92rem;" class="text-truncate">${e.name}</div>
-                <div style="font-size:.78rem;color:var(--txt-3);">${e.dept}</div>
-                <div style="margin-top:4px;">${badge(sc.status)}</div>
-              </div>
-              <span class="fav-star" style="color:#f59e0b;" onclick="event.stopPropagation();toggleFav('${e.id}');renderFavorites();">★</span>
-            </div>
-          </div>
-        `;
-      }).join('')}
-    </div>
-  `);
+  const dk=dateKey(S.date);
+  setHTML('favContent',`<div class="stats-grid">${favs.map(e=>{
+    const sc=e.schedule[dk]||{status:'off'};
+    return `<div class="card" style="cursor:pointer;" onclick="navigate('employee',{id:'${e.name}'})">
+      <div class="card-body" style="display:flex;align-items:center;gap:12px;">
+        ${avatarHTML(e.name,e.color,44)}
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:700;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${e.name}</div>
+          <div class="txt-muted txt-sm">${e.rg||''}</div>
+          <div style="margin-top:4px;">${badge(sc.status)}</div>
+        </div>
+        <span class="fav-star" style="color:#f59e0b;" onclick="event.stopPropagation();toggleFav('${e.name}')">★</span>
+      </div>
+    </div>`;
+  }).join('')}</div>`);
 }
 
-// ═══════════════════ PROFILE ═════════════════════
+// ═══════════════════ EMPLOYEE PROFILE ════════════
 
-function renderProfile(empId) {
-  const emp = S.data.find(e => e.id === empId);
-  if (!emp) {
-    setHTML('profileContent', '<div class="empty-state"><div class="empty-state-text">Сотрудник не найден</div></div>');
-    return;
-  }
+function renderProfile(empName) {
+  const emp = S.data.find(e=>e.name===empName);
+  if (!emp) { setHTML('profileContent', emptyState('Сотрудник не найден',empName,'⚠️')); return; }
 
-  // Week: Mon to Sun of current week
-  const today = S.date;
-  const dow = today.getDay();
-  const mondayOffset = (dow + 6) % 7;
-  const weekDays = Array.from({length: 7}, (_,i) => addDays(today, i - mondayOffset));
+  const sc   = getScheduleOn(emp);
+  const brk  = getBreaksFor(emp.name);
+  const isFav= S.favorites.includes(emp.name);
 
-  const weekCardsHTML = weekDays.map(d => {
-    const sc = emp.schedule[dateKey(d)] || { status: STATUS.OFF };
-    const isT = isToday(d);
-    const col = STATUS_COLOR[sc.status] || '#94a3b8';
-    return `
-      <div class="profile-day-card${isT?' today':''}" onclick="S.date=new Date(${d.getTime()});updateDateDisplay();navigate('employee',{id:'${emp.id}'})">
-        <div class="profile-day-name">${DAYS_RU[d.getDay()]}</div>
-        <div class="profile-day-num">${d.getDate()}</div>
-        <div class="profile-day-status" style="color:${col};">${STATUS_LABEL[sc.status] || '—'}</div>
-        ${sc.shiftStart ? `<div style="font-size:.7rem;color:var(--txt-3);margin-top:2px;">${sc.shiftStart}–${sc.shiftEnd}</div>` : ''}
-      </div>
-    `;
+  const isWork = ['work','21','9'].includes(sc.status);
+
+  // Week days
+  const dow = S.date.getDay();
+  const mondayOff = (dow+6)%7;
+  const weekDays = Array.from({length:7},(_,i)=>addDays(S.date,i-mondayOff));
+
+  const weekHTML = weekDays.map(d=>{
+    const dsc=emp.schedule[dateKey(d)]||{status:'off'};
+    const isT=isToday(d);
+    const col=STATUS_COLOR[dsc.status]||'#94a3b8';
+    return `<div class="profile-day${isT?' profile-day-today':''}" onclick="S.date=new Date(${d.getTime()});updateDateDisplay();renderProfile('${emp.name}')">
+      <div class="profile-day-name">${DAYS_RU[d.getDay()]}</div>
+      <div class="profile-day-num">${d.getDate()}</div>
+      <div class="profile-day-status" style="color:${col};">${STATUS_LABEL[dsc.status]||'—'}</div>
+      ${dsc.shiftStart?`<div class="txt-sm txt-muted">${dsc.shiftStart}–${dsc.shiftEnd}</div>`:''}
+    </div>`;
   }).join('');
 
-  const sc = getScheduleOn(emp);
-  const isWorking = sc.status === STATUS.WORK || sc.status === STATUS.NIGHT || sc.status === STATUS.CHANGED;
-  const isFav = S.favorites.includes(emp.id);
-
-  // Month stats
-  const mKey = `${S.date.getFullYear()}-${String(S.date.getMonth()+1).padStart(2,'0')}`;
-  let workDays = 0, offDays = 0, sickDays = 0, vacDays = 0;
-  Object.entries(emp.schedule).forEach(([k, v]) => {
-    if (!k.startsWith(mKey)) return;
-    if (v.status === STATUS.WORK || v.status === STATUS.NIGHT || v.status === STATUS.CHANGED) workDays++;
-    else if (v.status === STATUS.SICK) sickDays++;
-    else if (v.status === STATUS.VACATION) vacDays++;
-    else offDays++;
-  });
-
-  const breaksHTML = isWorking && sc.breaks ? `
+  const breaksHTML = isWork ? `
     <div class="card">
-      <div class="card-header"><span class="card-title">☕ Перерывы сегодня</span></div>
+      <div class="card-hdr"><span class="card-title">☕ Перерывы</span></div>
       <div class="card-body">
-        ${sc.breaks.map(b => `
-          <div class="modal-info-row">
-            <span class="modal-info-label">${b.type==='lunch'?'🍽 Обед':'☕ Перерыв'}</span>
-            <span class="modal-info-value">${b.start} – ${b.end}</span>
-          </div>
-        `).join('')}
+        ${(brk?.breaks || (sc.lunchHour?[{start:`${pad(sc.lunchHour)}:00`,end:`${pad(sc.lunchHour+1)}:00`,type:'обед'}]:[])).map(b=>`
+          <div class="info-row">
+            <span class="info-label">${b.type==='обед'?'🍽 Обед':b.type==='ужин'?'🌙 Ужин':'☕ Перерыв'}</span>
+            <span class="info-val">${b.start} – ${b.end}</span>
+          </div>`).join('') || '<div class="txt-muted">Нет данных о перерывах</div>'}
       </div>
     </div>
   ` : '';
 
-  setHTML('profileContent', `
-    <div>
-      <div style="margin-bottom:16px;">
-        <button class="btn btn-ghost" onclick="history.back()">← Назад</button>
-      </div>
+  // Month stats
+  const mPfx=`${S.date.getFullYear()}-${pad(S.date.getMonth()+1)}`;
+  const mSt={work:0,night:0,vac:0,sick:0,off:0};
+  Object.entries(emp.schedule||{}).forEach(([k,v])=>{
+    if(!k.startsWith(mPfx)) return;
+    if(v.status==='work'||v.status==='9') mSt.work++;
+    else if(v.status==='21') mSt.night++;
+    else if(v.status==='ОТ') mSt.vac++;
+    else if(v.status==='БЛ') mSt.sick++;
+    else mSt.off++;
+  });
 
-      <div class="profile-header">
-        ${makeAvatar(emp.name, emp.color, 72)}
-        <div style="flex:1;">
+  setHTML('profileContent',`
+    <div>
+      <button class="btn btn-ghost" onclick="history.back()" style="margin-bottom:16px;">← Назад</button>
+      <div class="profile-hdr">
+        ${avatarHTML(emp.name, emp.color, 64)}
+        <div>
           <div class="profile-name">${emp.name}</div>
-          <div class="profile-meta">${emp.pos} · ${emp.dept}</div>
-          <div class="profile-meta" style="margin-top:2px;">Смена ${emp.shift} · СВ: ${emp.sv}</div>
-          <div style="margin-top:10px;display:flex;align-items:center;gap:10px;">
+          <div class="txt-muted">${emp.line||''} · ${emp.rg||''}</div>
+          <div class="txt-muted" style="margin-top:2px;">СВ: ${emp.sv||'—'} · График: ${emp.graphSurv||'—'}</div>
+          <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             ${badge(sc.status)}
-            ${isWorking ? `<span style="font-size:.85rem;color:var(--txt-3);">${sc.shiftStart}–${sc.shiftEnd}</span>` : ''}
-            <button class="btn btn-sm btn-ghost" onclick="toggleFav('${emp.id}');renderProfile('${emp.id}')" style="color:${isFav?'#f59e0b':'var(--txt-3)'};">
-              ${isFav?'★ В избранном':'☆ В избранное'}
+            ${isWork?`<span class="txt-muted txt-sm">${sc.shiftStart}–${sc.shiftEnd}</span>`:''}
+            <button class="btn btn-sm btn-ghost" onclick="toggleFav('${emp.name}');renderProfile('${emp.name}')" style="color:${isFav?'#f59e0b':'var(--txt-muted)'};">
+              ${isFav?'★ В избранном':'☆ Добавить'}
             </button>
           </div>
         </div>
       </div>
 
-      <div class="card mb-16" style="margin-bottom:16px;">
-        <div class="card-header"><span class="card-title">📅 График на неделю</span></div>
-        <div class="card-body">
-          <div class="profile-week">${weekCardsHTML}</div>
-        </div>
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-hdr"><span class="card-title">📅 Неделя</span></div>
+        <div class="card-body"><div class="profile-week">${weekHTML}</div></div>
       </div>
 
-      <div class="profile-grid">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
         <div style="display:flex;flex-direction:column;gap:16px;">
           ${breaksHTML}
-
           <div class="card">
-            <div class="card-header"><span class="card-title">📊 Итоги месяца</span></div>
+            <div class="card-hdr"><span class="card-title">📊 Месяц</span></div>
             <div class="card-body">
               <div class="stats-grid" style="grid-template-columns:repeat(2,1fr);">
-                <div class="stat-card"><div class="stat-card-label">Рабочих дней</div><div class="stat-card-value" style="color:var(--c-work);font-size:1.4rem;">${workDays}</div></div>
-                <div class="stat-card"><div class="stat-card-label">Выходных</div><div class="stat-card-value" style="color:var(--txt-3);font-size:1.4rem;">${offDays}</div></div>
-                <div class="stat-card"><div class="stat-card-label">Больничный</div><div class="stat-card-value" style="color:var(--c-sick);font-size:1.4rem;">${sickDays}</div></div>
-                <div class="stat-card"><div class="stat-card-label">Отпуск</div><div class="stat-card-value" style="color:var(--c-vacation);font-size:1.4rem;">${vacDays}</div></div>
+                <div class="stat-card"><div class="stat-card-label">Рабочих</div><div class="stat-card-value" style="color:var(--c-work);font-size:1.4rem;">${mSt.work}</div></div>
+                <div class="stat-card"><div class="stat-card-label">Ночных</div><div class="stat-card-value" style="color:var(--c-night);font-size:1.4rem;">${mSt.night}</div></div>
+                <div class="stat-card"><div class="stat-card-label">Отпуск</div><div class="stat-card-value" style="color:var(--c-vac);font-size:1.4rem;">${mSt.vac}</div></div>
+                <div class="stat-card"><div class="stat-card-label">Больничный</div><div class="stat-card-value" style="color:var(--c-sick);font-size:1.4rem;">${mSt.sick}</div></div>
               </div>
             </div>
           </div>
         </div>
-
         <div>
           <div class="card">
-            <div class="card-header"><span class="card-title">ℹ️ Информация</span></div>
+            <div class="card-hdr"><span class="card-title">ℹ️ Информация</span></div>
             <div class="card-body">
-              <div class="modal-info-row"><span class="modal-info-label">ФИО</span><span class="modal-info-value">${emp.name}</span></div>
-              <div class="modal-info-row"><span class="modal-info-label">Должность</span><span class="modal-info-value">${emp.pos}</span></div>
-              <div class="modal-info-row"><span class="modal-info-label">Отдел</span><span class="modal-info-value">${emp.dept}</span></div>
-              <div class="modal-info-row"><span class="modal-info-label">Супервайзер</span><span class="modal-info-value">${emp.sv}</span></div>
-              <div class="modal-info-row"><span class="modal-info-label">Смена</span><span class="modal-info-value">Смена ${emp.shift}</span></div>
-              <div class="modal-info-row"><span class="modal-info-label">Статус сегодня</span><span class="modal-info-value">${badge(sc.status)}</span></div>
-              ${isWorking ? `<div class="modal-info-row"><span class="modal-info-label">Время смены</span><span class="modal-info-value">${sc.shiftStart}–${sc.shiftEnd}</span></div>` : ''}
+              ${[['ФИО',emp.name],['Линия',emp.line],['РГ',emp.rg],['Супервайзер',emp.sv],['График',emp.graphSurv],['Дата приёма',emp.hireDate]].map(([l,v])=>`
+                <div class="info-row"><span class="info-label">${l}</span><span class="info-val">${v||'—'}</span></div>`).join('')}
+              <div class="info-row"><span class="info-label">Статус</span><span class="info-val">${badge(sc.status)}</span></div>
+            </div>
+          </div>
+          <div class="card" style="margin-top:16px;">
+            <div class="card-hdr"><span class="card-title">✏️ Изменить статус</span></div>
+            <div class="card-body">
+              <div class="form-row">
+                <label>Статус на ${S.date.getDate()} ${MONTHS_GEN[S.date.getMonth()]}</label>
+                <select id="editStatus" onchange="previewStatusChange(this.value)">
+                  ${['work','21','9','ОТ','БЛ','УО','ОЗ','НЯ','off'].map(s=>`<option value="${s}" ${sc.status===s?'selected':''}>${STATUS_LABEL[s]}</option>`).join('')}
+                </select>
+              </div>
+              <div id="editTimeFields" style="${isWork?'':'display:none'}">
+                <div class="form-row"><label>Начало</label><input type="time" id="editStart" value="${sc.shiftStart||'09:00'}" /></div>
+                <div class="form-row"><label>Конец</label><input type="time" id="editEnd" value="${sc.shiftEnd||'18:00'}" /></div>
+              </div>
+              <button class="btn btn-primary" style="margin-top:12px;width:100%;" onclick="saveStatusEdit('${emp.name}')">Сохранить изменение</button>
             </div>
           </div>
         </div>
@@ -1404,625 +1459,464 @@ function renderProfile(empId) {
   `);
 }
 
-// ═══════════════════ EMPLOYEE MODAL ══════════════
+window.previewStatusChange = function(val) {
+  const show = ['work','21','9'].includes(val);
+  const f = el('editTimeFields');
+  if (f) f.style.display = show ? '' : 'none';
+};
 
-function showEmpModal(empId) {
-  const emp = S.data.find(e => e.id === empId);
+window.saveStatusEdit = function(empName) {
+  const emp = S.data.find(e=>e.name===empName);
   if (!emp) return;
-  const sc = getScheduleOn(emp);
-  const isWorking = sc.status === STATUS.WORK || sc.status === STATUS.NIGHT || sc.status === STATUS.CHANGED;
+  const dk  = dateKey(S.date);
+  const st  = el('editStatus').value;
+  const cur = emp.schedule[dk] || {};
 
-  const breaksRows = (isWorking && sc.breaks) ? sc.breaks.map(b => `
-    <div class="modal-info-row">
-      <span class="modal-info-label">${b.type==='lunch'?'🍽 Обед':'☕ Перерыв'}</span>
-      <span class="modal-info-value">${b.start}–${b.end}</span>
-    </div>
-  `).join('') : '<div class="modal-info-row"><span class="modal-info-label">Нет перерывов</span></div>';
+  if (['work','21','9'].includes(st)) {
+    emp.schedule[dk] = {
+      ...cur,
+      status:     st,
+      shiftStart: (el('editStart')||{}).value || cur.shiftStart || '09:00',
+      shiftEnd:   (el('editEnd')||{}).value   || cur.shiftEnd   || '18:00',
+      raw: null, // clear raw so export recalculates
+    };
+  } else {
+    emp.schedule[dk] = { status: st, raw: null };
+  }
 
-  openModal(emp.name, `
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-      ${makeAvatar(emp.name, emp.color, 52)}
-      <div>
-        <div style="font-size:.9rem;font-weight:600;">${emp.pos}</div>
-        <div style="font-size:.82rem;color:var(--txt-3);">${emp.dept} · Смена ${emp.shift}</div>
-        <div style="margin-top:6px;">${badge(sc.status)}</div>
-      </div>
-    </div>
+  saveSchedule();
+  renderProfile(empName);
+  toast('✅ Изменение сохранено', 'success');
+};
 
-    <div class="modal-section">
-      <div class="modal-section-title">Смена</div>
-      <div class="modal-info-row"><span class="modal-info-label">Статус</span><span class="modal-info-value">${STATUS_LABEL[sc.status]||'—'}</span></div>
-      ${isWorking ? `<div class="modal-info-row"><span class="modal-info-label">Время</span><span class="modal-info-value">${sc.shiftStart}–${sc.shiftEnd}</span></div>` : ''}
-      <div class="modal-info-row"><span class="modal-info-label">Супервайзер</span><span class="modal-info-value">${emp.sv}</span></div>
-    </div>
-
-    ${isWorking ? `
-    <div class="modal-section">
-      <div class="modal-section-title">Перерывы</div>
-      ${breaksRows}
-    </div>
-    ` : ''}
-
-    <div style="display:flex;gap:8px;margin-top:16px;">
-      <button class="btn btn-primary" onclick="closeModal();navigate('employee',{id:'${emp.id}'})">Профиль</button>
-      <button class="btn btn-outline" onclick="closeModal()">Закрыть</button>
-    </div>
-  `);
-}
-
-// ═══════════════════ IMPORT ══════════════════════
+// ═══════════════════ IMPORT PAGE ═════════════════
 
 function renderImport() {
   setHTML('importContent', `
-    <div class="drop-zone" id="dropZone" onclick="el('fileInput').click()">
-      <div class="drop-icon">📥</div>
-      <div class="drop-title">Перетащите Excel-файл сюда</div>
-      <div class="drop-sub">или нажмите для выбора файла</div>
-      <button class="btn btn-primary">Выбрать файл (.xlsx)</button>
-      <div class="drop-note">
-        ${window.XLSX_AVAILABLE
-          ? '✅ SheetJS загружен — импорт Excel доступен'
-          : '⚠️ SheetJS не загружен. Откройте с интернетом или скачайте xlsx.full.min.js в папку lib/'}
-      </div>
-    </div>
-    <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.json" onchange="handleFileInput(this)" />
+    <div class="import-two-col">
 
-    <div class="import-grid">
-      <div class="import-card">
-        <h3>📋 Формат импорта расписания</h3>
-        <p>Excel-файл должен содержать листы с расписанием.</p>
-        <p>Ожидаемые колонки: ФИО, Смена, Супервайзер, Дата, Статус, Начало, Конец</p>
-        <button class="btn btn-outline" onclick="downloadTemplate()">⬇️ Скачать шаблон</button>
+      <!-- Zone 1: Schedule -->
+      <div class="import-zone" id="zone1">
+        <div class="drop-zone" id="dropZone1" onclick="el('fi1').click()">
+          <div class="drop-icon">📊</div>
+          <div class="drop-title">Файл расписания</div>
+          <div class="drop-sub">(формат: ФИО + 5 ячеек/день)</div>
+          <button class="btn btn-primary" type="button">Выбрать .xlsx</button>
+          <div class="drop-note">${window.XLSX_AVAILABLE?'✅ SheetJS загружен':'⚠️ SheetJS не загружен — нужен интернет'}</div>
+        </div>
+        <input type="file" id="fi1" accept=".xlsx,.xls,.json" style="display:none;" onchange="handleFile1(this)" />
+        <div id="preview1" class="import-preview"></div>
       </div>
 
-      <div class="import-card">
-        <h3>📄 Импорт JSON</h3>
-        <p>Вы можете загрузить ранее экспортированные данные в формате JSON.</p>
-        <button class="btn btn-outline" onclick="el('fileInput').click()">Загрузить JSON</button>
-      </div>
-
-      <div class="import-card">
-        <h3>🔄 Сброс данных</h3>
-        <p>Вернуть демо-данные, сбросив все изменения.</p>
-        <button class="btn btn-danger" onclick="resetToMock()">Сбросить к демо-данным</button>
-      </div>
-
-      <div class="import-card">
-        <h3>💾 Текущие данные</h3>
-        <p>Сотрудников в системе: <strong>${S.data.length}</strong></p>
-        <p>Дата последнего обновления: <strong>${new Date().toLocaleDateString('ru-RU')}</strong></p>
-        <button class="btn btn-outline" onclick="exportJSON()">💾 Сохранить JSON</button>
+      <!-- Zone 2: Breaks -->
+      <div class="import-zone" id="zone2">
+        <div class="drop-zone" id="dropZone2" onclick="el('fi2').click()">
+          <div class="drop-icon">☕</div>
+          <div class="drop-title">Файл перерывов</div>
+          <div class="drop-sub">(формат: ФИО + Смена + 10-мин. слоты)</div>
+          <button class="btn btn-primary" type="button">Выбрать .xlsx</button>
+          <div class="drop-note">${S.breaks.length?`✅ Загружено ${S.breaks.length} сотр.`:'Не загружен'}</div>
+        </div>
+        <input type="file" id="fi2" accept=".xlsx,.xls,.json" style="display:none;" onchange="handleFile2(this)" />
+        <div id="preview2" class="import-preview"></div>
       </div>
     </div>
 
-    <div id="importPreview" style="margin-top:24px;"></div>
+    <div class="import-actions">
+      <div class="card">
+        <div class="card-hdr"><span class="card-title">💾 Управление данными</span></div>
+        <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;">
+          <div>
+            <div class="txt-sm txt-muted">Сотрудников в системе</div>
+            <div style="font-size:1.5rem;font-weight:700;color:var(--primary);" id="empCountBadge">${S.data.length}</div>
+          </div>
+          <div>
+            <div class="txt-sm txt-muted">Записей перерывов</div>
+            <div style="font-size:1.5rem;font-weight:700;color:var(--primary);">${S.breaks.length}</div>
+          </div>
+          <div style="flex:1;display:flex;align-items:flex-end;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+            <button class="btn btn-outline" onclick="exportJSON()">💾 Резервная копия JSON</button>
+            <button class="btn btn-outline" onclick="el('fiJson').click()">📂 Загрузить JSON</button>
+            <button class="btn btn-danger" onclick="clearAllData()">🗑 Очистить всё</button>
+          </div>
+        </div>
+      </div>
+      <input type="file" id="fiJson" accept=".json" style="display:none;" onchange="loadJSON(this)" />
+    </div>
   `);
 
-  // Drag & drop
-  const dz = el('dropZone');
-  if (dz) {
-    dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('drag-over'); });
-    dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
-    dz.addEventListener('drop', e => {
-      e.preventDefault();
-      dz.classList.remove('drag-over');
-      const file = e.dataTransfer.files[0];
-      if (file) processFile(file);
-    });
-  }
+  setupDragDrop('dropZone1', file => processScheduleFile(file));
+  setupDragDrop('dropZone2', file => processBreaksFile(file));
 }
 
-function handleFileInput(input) {
-  const file = input.files[0];
-  if (file) processFile(file);
-}
-
-function processFile(file) {
-  const ext = file.name.split('.').pop().toLowerCase();
-
-  if (ext === 'json') {
-    const reader = new FileReader();
-    reader.onload = e => {
-      try {
-        const data = JSON.parse(e.target.result);
-        if (Array.isArray(data)) {
-          S.data = data;
-          saveData(S.data);
-          toast('✅ JSON импортирован успешно', 'success');
-          showImportPreview(data);
-        } else { toast('❌ Неверный формат JSON', 'error'); }
-      } catch { toast('❌ Ошибка чтения JSON', 'error'); }
-    };
-    reader.readAsText(file);
-    return;
-  }
-
-  if ((ext === 'xlsx' || ext === 'xls') && window.XLSX_AVAILABLE) {
-    const reader = new FileReader();
-    reader.onload = e => {
-      try {
-        const wb = XLSX.read(e.target.result, { type: 'array' });
-        const parsed = parseExcelWorkbook(wb);
-        if (parsed.length) {
-          S.data = parsed;
-          saveData(S.data);
-          toast(`✅ Импортировано ${parsed.length} сотрудников`, 'success');
-          showImportPreview(parsed);
-        } else {
-          toast('⚠️ Данные не найдены в файле', 'warning');
-          showExcelRaw(wb);
-        }
-      } catch(err) {
-        toast('❌ Ошибка чтения Excel: ' + err.message, 'error');
-      }
-    };
-    reader.readAsArrayBuffer(file);
-    return;
-  }
-
-  if ((ext === 'xlsx' || ext === 'xls') && !window.XLSX_AVAILABLE) {
-    toast('⚠️ Библиотека SheetJS не загружена. Нужен интернет.', 'warning');
-    return;
-  }
-
-  toast('⚠️ Неподдерживаемый формат файла', 'warning');
-}
-
-function parseExcelWorkbook(wb) {
-  const results = [];
-  wb.SheetNames.forEach(sheetName => {
-    const ws = wb.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false });
-    if (!rows.length) return;
-
-    const headers = (rows[0] || []).map(h => String(h||'').trim().toLowerCase());
-    const nameIdx  = headers.findIndex(h => h.includes('фио') || h.includes('имя') || h.includes('name'));
-    const svIdx    = headers.findIndex(h => h.includes('св') || h.includes('супервайзер'));
-    const shiftIdx = headers.findIndex(h => h.includes('смена') || h.includes('shift'));
-    const deptIdx  = headers.findIndex(h => h.includes('отдел') || h.includes('dept'));
-    const posIdx   = headers.findIndex(h => h.includes('должн') || h.includes('pos'));
-
-    if (nameIdx < 0) return;
-
-    rows.slice(1).forEach((row, ri) => {
-      const name = row[nameIdx] ? String(row[nameIdx]).trim() : '';
-      if (!name) return;
-      const existing = results.find(e => e.name === name);
-      if (existing) return; // skip duplicates
-
-      const emp = {
-        id:    `xlsx-${ri}-${Date.now()}`,
-        name,
-        dept:  deptIdx >= 0  ? String(row[deptIdx]||'').trim()  : 'Не указан',
-        sv:    svIdx >= 0    ? String(row[svIdx]||'').trim()    : 'Не указан',
-        shift: shiftIdx >= 0 ? String(row[shiftIdx]||'').trim() : '1',
-        pos:   posIdx >= 0   ? String(row[posIdx]||'').trim()   : 'Сотрудник',
-        color: COLORS_POOL[results.length % COLORS_POOL.length],
-        schedule: generateSchedule({ id:`xlsx-${ri}`, shift: shiftIdx>=0?String(row[shiftIdx]||'1'):'1' }),
-      };
-      results.push(emp);
-    });
+function setupDragDrop(zoneId, handler) {
+  const dz = el(zoneId);
+  if (!dz) return;
+  dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault();
+    dz.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (f) handler(f);
   });
-  return results;
 }
 
-function showExcelRaw(wb) {
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false }).slice(0, 10);
-  const preview = el('importPreview');
-  if (!preview) return;
-  preview.innerHTML = `
-    <div class="card">
-      <div class="card-header"><span class="card-title">Предпросмотр Excel (первые 10 строк)</span></div>
+window.handleFile1 = function(inp) { if(inp.files[0]) processScheduleFile(inp.files[0]); };
+window.handleFile2 = function(inp) { if(inp.files[0]) processBreaksFile(inp.files[0]); };
+
+function processScheduleFile(file) {
+  if (file.name.endsWith('.json')) { loadJSONFile(file); return; }
+  if (!window.XLSX_AVAILABLE) { toast('SheetJS не загружен (нужен интернет)', 'warning'); return; }
+  toast('⏳ Читаю файл расписания…');
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type:'array', cellDates:false });
+      const { employees, meta } = parseScheduleWorkbook(wb);
+      S.data = employees;
+      saveSchedule();
+      toast(`✅ Расписание: ${employees.length} сотрудников`, 'success');
+      showImportPreview('preview1', employees, meta);
+      el('empCountBadge') && (el('empCountBadge').textContent = employees.length);
+      updateSidebarStatus();
+    } catch(err) {
+      console.error(err);
+      toast('❌ Ошибка чтения: ' + err.message, 'error');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function processBreaksFile(file) {
+  if (!window.XLSX_AVAILABLE) { toast('SheetJS не загружен', 'warning'); return; }
+  toast('⏳ Читаю файл перерывов…');
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type:'array' });
+      const breaks = parseBreaksWorkbook(wb);
+      S.breaks = breaks;
+      saveBreaks();
+      toast(`✅ Перерывы: ${breaks.length} сотрудников`, 'success');
+      showBreaksPreview('preview2', breaks);
+    } catch(err) {
+      console.error(err);
+      toast('❌ Ошибка: ' + err.message, 'error');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function showImportPreview(previewId, emps, meta) {
+  const prev = el(previewId);
+  if (!prev) return;
+  const months = (meta?.months||[]).map(m=>m.sheetName).join(', ');
+  prev.innerHTML = `
+    <div class="card" style="margin-top:12px;">
+      <div class="card-hdr"><span class="card-title">✅ Загружено: ${emps.length} сотрудников</span>${months?`<span class="txt-muted txt-sm">${months}</span>`:''}</div>
       <div class="card-body" style="overflow-x:auto;">
         <table class="emp-table">
-          ${rows.map((r,i) => `<tr>${r.map(c=>`<td>${c||''}</td>`).join('')}</tr>`).join('')}
+          <thead><tr><th>ФИО</th><th>РГ</th><th>СВ</th><th>График</th><th>Дней</th></tr></thead>
+          <tbody>${emps.slice(0,15).map(e=>`<tr><td>${e.name}</td><td>${e.rg||'—'}</td><td>${e.sv||'—'}</td><td>${e.graphSurv||'—'}</td><td>${Object.keys(e.schedule||{}).length}</td></tr>`).join('')}
+          ${emps.length>15?`<tr><td colspan="5" class="txt-muted" style="text-align:center;">… ещё ${emps.length-15}</td></tr>`:''}</tbody>
         </table>
       </div>
     </div>
   `;
 }
 
-function showImportPreview(data) {
-  const preview = el('importPreview');
-  if (!preview) return;
-  preview.innerHTML = `
-    <div class="card">
-      <div class="card-header"><span class="card-title">✅ Импортировано: ${data.length} сотрудников</span></div>
+function showBreaksPreview(previewId, breaks) {
+  const prev = el(previewId);
+  if (!prev) return;
+  prev.innerHTML = `
+    <div class="card" style="margin-top:12px;">
+      <div class="card-hdr"><span class="card-title">✅ Загружено: ${breaks.length} сотрудников</span></div>
       <div class="card-body" style="overflow-x:auto;">
         <table class="emp-table">
-          <thead><tr><th>ФИО</th><th>Отдел</th><th>Должность</th><th>СВ</th><th>Смена</th></tr></thead>
-          <tbody>
-            ${data.slice(0,15).map(e => `
-              <tr>
-                <td>${e.name}</td>
-                <td>${e.dept}</td>
-                <td>${e.pos}</td>
-                <td>${e.sv}</td>
-                <td>Смена ${e.shift}</td>
-              </tr>
-            `).join('')}
-            ${data.length > 15 ? `<tr><td colspan="5" style="text-align:center;color:var(--txt-3);">... ещё ${data.length-15}</td></tr>` : ''}
-          </tbody>
+          <thead><tr><th>ФИО</th><th>Смена</th><th>СВ</th><th>Перерывов</th></tr></thead>
+          <tbody>${breaks.slice(0,15).map(b=>`<tr><td>${b.name}</td><td>${b.shift}</td><td>${b.sv}</td><td>${(b.breaks||[]).length}</td></tr>`).join('')}
+          ${breaks.length>15?`<tr><td colspan="4" class="txt-muted" style="text-align:center;">… ещё ${breaks.length-15}</td></tr>`:''}</tbody>
         </table>
       </div>
     </div>
   `;
 }
 
-function downloadTemplate() {
-  if (!window.XLSX_AVAILABLE) {
-    toast('⚠️ SheetJS не загружен', 'warning');
-    return;
-  }
-  const ws_data = [
-    ['ФИО', 'Отдел', 'Должность', 'Супервайзер', 'Смена', 'Статус', 'Дата', 'Начало', 'Конец'],
-    ['Иванов Иван Иванович', 'Обслуживание клиентов', 'Оператор', 'Александрова Н.В.', '1', 'work', '2026-05-16', '09:00', '18:00'],
-    ['Петрова Анна Сергеевна', 'Кредитный отдел', 'Специалист', 'Смирнова Е.П.', '2', 'work', '2026-05-16', '12:00', '21:00'],
-  ];
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(ws_data);
-  XLSX.utils.book_append_sheet(wb, ws, 'Расписание');
-  XLSX.writeFile(wb, 'kaorzip_template.xlsx');
-  toast('✅ Шаблон скачан', 'success');
+window.loadJSON = function(inp) {
+  if (!inp.files[0]) return;
+  loadJSONFile(inp.files[0]);
+};
+
+function loadJSONFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (data.schedule && Array.isArray(data.schedule)) {
+        S.data   = data.schedule;
+        S.breaks = data.breaks || [];
+        saveSchedule(); saveBreaks();
+        toast(`✅ JSON загружен: ${S.data.length} сотр.`, 'success');
+        renderImport();
+      } else if (Array.isArray(data)) {
+        S.data = data;
+        saveSchedule();
+        toast(`✅ JSON загружен: ${data.length} сотр.`, 'success');
+        renderImport();
+      } else { toast('❌ Неверный формат JSON', 'error'); }
+    } catch { toast('❌ Ошибка JSON', 'error'); }
+  };
+  reader.readAsText(file);
 }
 
-function resetToMock() {
-  if (!confirm('Сбросить все данные к демо-данным?')) return;
-  S.data = buildMockData();
-  saveData(S.data);
-  toast('✅ Данные сброшены', 'success');
+window.clearAllData = function() {
+  if (!confirm('Удалить все данные? Это действие нельзя отменить.')) return;
+  S.data = []; S.breaks = [];
+  saveSchedule(); saveBreaks();
   renderImport();
-}
+  toast('Данные очищены', 'warning');
+};
 
-function exportJSON() {
-  const json = JSON.stringify(S.data, null, 2);
-  const blob = new Blob([json], { type: 'application/json' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  a.download = `kaorzip_data_${dateKey(new Date())}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
-  toast('✅ JSON сохранён', 'success');
-}
-
-// ═══════════════════ EXPORT ══════════════════════
+// ═══════════════════ EXPORT PAGE ═════════════════
 
 function renderExport() {
   setHTML('exportContent', `
     <div class="export-grid">
-      <div class="export-card hover-card">
+
+      <div class="export-card">
+        <div class="export-icon">📊</div>
+        <div class="export-title">Расписание .xlsx</div>
+        <div class="export-desc">Экспорт в исходном формате файла 1<br>(5 ячеек на день, все листы по месяцам)</div>
+        <button class="btn btn-primary w-full" onclick="exportScheduleExcel()">Скачать расписание</button>
+      </div>
+
+      <div class="export-card">
+        <div class="export-icon">☕</div>
+        <div class="export-title">Перерывы .xlsx</div>
+        <div class="export-desc">Экспорт в исходном формате файла 2<br>(10-минутные слоты: перерыв/обед/ужин)</div>
+        <button class="btn btn-primary w-full" onclick="exportBreaksExcel()">Скачать перерывы</button>
+      </div>
+
+      <div class="export-card">
         <div class="export-icon">🖼️</div>
-        <div class="export-title">Экспорт PNG</div>
-        <div class="export-desc">Сохранить текущий Timeline как изображение</div>
-        <button class="btn btn-primary w-full" onclick="exportPNG()">
-          ${window.H2C_AVAILABLE ? 'Скачать PNG' : '⚠️ html2canvas не загружен'}
-        </button>
+        <div class="export-title">Timeline → PNG</div>
+        <div class="export-desc">Снимок шкалы смен текущего дня<br>в высоком качестве</div>
+        <button class="btn btn-outline w-full" onclick="navigate('timeline');setTimeout(()=>captureAndSave('tlWrap','Timeline_'+dateKey(S.date)+'.png'),400)">${window.H2C_AVAILABLE?'Сохранить PNG':'⚠️ html2canvas не загружен'}</button>
       </div>
 
-      <div class="export-card hover-card">
+      <div class="export-card">
+        <div class="export-icon">☕</div>
+        <div class="export-title">Перерывы → PNG</div>
+        <div class="export-desc">Снимок графика перерывов<br>в высоком качестве</div>
+        <button class="btn btn-outline w-full" onclick="navigate('breaks');setTimeout(()=>captureAndSave('breaksCard','Перерывы_'+dateKey(S.date)+'.png'),400)">${window.H2C_AVAILABLE?'Сохранить PNG':'⚠️ html2canvas не загружен'}</button>
+      </div>
+
+      <div class="export-card">
         <div class="export-icon">📄</div>
-        <div class="export-title">Экспорт PDF</div>
-        <div class="export-desc">Печатная версия расписания в PDF</div>
-        <button class="btn btn-primary w-full" onclick="exportPDF()">
-          ${window.JSPDF_AVAILABLE ? 'Скачать PDF' : '⚠️ jsPDF не загружен'}
-        </button>
+        <div class="export-title">PDF отчёт</div>
+        <div class="export-desc">Timeline в PDF (альбомная ориентация)</div>
+        <button class="btn btn-outline w-full" onclick="navigate('timeline');setTimeout(()=>captureAndPDF('tlWrap','KAORZIP_'+dateKey(S.date)+'.pdf'),400)">${window.JSPDF_AVAILABLE?'Скачать PDF':'⚠️ jsPDF не загружен'}</button>
       </div>
 
-      <div class="export-card hover-card">
-        <div class="export-icon">🖨️</div>
-        <div class="export-title">Печать</div>
-        <div class="export-desc">Отправить расписание на принтер</div>
-        <button class="btn btn-outline w-full" onclick="window.print()">Печать</button>
-      </div>
-
-      <div class="export-card hover-card">
+      <div class="export-card">
         <div class="export-icon">💾</div>
-        <div class="export-title">Сохранить JSON</div>
-        <div class="export-desc">Резервная копия всех данных</div>
+        <div class="export-title">Резервная копия</div>
+        <div class="export-desc">Все данные в JSON<br>для переноса между устройствами</div>
         <button class="btn btn-outline w-full" onclick="exportJSON()">Скачать JSON</button>
       </div>
 
-      <div class="export-card hover-card">
-        <div class="export-icon">📊</div>
-        <div class="export-title">Экспорт Excel</div>
-        <div class="export-desc">Экспорт расписания в .xlsx</div>
-        <button class="btn btn-outline w-full" onclick="exportExcel()">
-          ${window.XLSX_AVAILABLE ? 'Скачать XLSX' : '⚠️ SheetJS не загружен'}
-        </button>
+      <div class="export-card">
+        <div class="export-icon">🖨️</div>
+        <div class="export-title">Печать</div>
+        <div class="export-desc">Отправить текущую страницу на принтер</div>
+        <button class="btn btn-outline w-full" onclick="window.print()">Печать</button>
       </div>
 
-      <div class="export-card hover-card">
+      <div class="export-card">
         <div class="export-icon">📱</div>
-        <div class="export-title">Текстовый отчёт</div>
-        <div class="export-desc">Сводка для Telegram / мессенджеров</div>
-        <button class="btn btn-outline w-full" onclick="exportTextReport()">Скопировать текст</button>
+        <div class="export-title">Текст / Telegram</div>
+        <div class="export-desc">Сводка дня текстом — скопировать в мессенджер</div>
+        <button class="btn btn-outline w-full" onclick="exportTextReport()">Копировать текст</button>
       </div>
-    </div>
 
-    <div id="exportPreview" style="margin-top:24px;"></div>
+    </div>
   `);
 }
 
-async function exportPNG() {
-  if (!window.H2C_AVAILABLE) { toast('⚠️ html2canvas не загружен', 'warning'); return; }
-  toast('⏳ Генерация PNG…');
-  navigate('timeline');
-  await new Promise(r => setTimeout(r, 500));
-  try {
-    const canvas = await html2canvas(el('timelineContent'), { scale: 2, backgroundColor: '#ffffff' });
-    const a = document.createElement('a');
-    a.download = `timeline_${dateKey(S.date)}.png`;
-    a.href = canvas.toDataURL('image/png');
-    a.click();
-    toast('✅ PNG скачан', 'success');
-  } catch(e) { toast('❌ Ошибка: ' + e.message, 'error'); }
-}
-
-async function exportPDF() {
-  if (!window.JSPDF_AVAILABLE) { toast('⚠️ jsPDF не загружен', 'warning'); return; }
-  if (!window.H2C_AVAILABLE)   { toast('⚠️ html2canvas не загружен', 'warning'); return; }
-  toast('⏳ Генерация PDF…');
-  navigate('timeline');
-  await new Promise(r => setTimeout(r, 500));
-  try {
-    const canvas = await html2canvas(el('timelineContent'), { scale: 1.5, backgroundColor: '#ffffff' });
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [canvas.width, canvas.height] });
-    pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, canvas.width, canvas.height);
-    pdf.save(`kaorzip_schedule_${dateKey(S.date)}.pdf`);
-    toast('✅ PDF скачан', 'success');
-  } catch(e) { toast('❌ Ошибка: ' + e.message, 'error'); }
-}
-
-function exportExcel() {
-  if (!window.XLSX_AVAILABLE) { toast('⚠️ SheetJS не загружен', 'warning'); return; }
-  const dk = dateKey(S.date);
-  const rows = [['ФИО','Отдел','Должность','Супервайзер','Смена','Статус','Начало','Конец']];
-  S.data.forEach(e => {
-    const sc = e.schedule[dk] || { status: STATUS.OFF };
-    rows.push([e.name, e.dept, e.pos, e.sv, e.shift, STATUS_LABEL[sc.status]||'—', sc.shiftStart||'', sc.shiftEnd||'']);
-  });
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  XLSX.utils.book_append_sheet(wb, ws, `График ${dk}`);
-  XLSX.writeFile(wb, `kaorzip_${dk}.xlsx`);
-  toast('✅ Excel скачан', 'success');
-}
-
-function exportTextReport() {
-  const dk = dateKey(S.date);
-  const lines = [`📅 График на ${formatDisplayDate(S.date)}`, ''];
-  DEPARTMENTS.forEach(dept => {
-    const emps = S.data.filter(e => e.dept === dept);
-    lines.push(`📂 ${dept}:`);
-    emps.forEach(e => {
-      const sc = e.schedule[dk] || { status: STATUS.OFF };
-      const timeStr = sc.shiftStart ? ` (${sc.shiftStart}–${sc.shiftEnd})` : '';
-      lines.push(`  • ${e.name} — ${STATUS_LABEL[sc.status]||'—'}${timeStr}`);
-    });
-    lines.push('');
-  });
-  navigator.clipboard.writeText(lines.join('\n')).then(() => {
-    toast('✅ Текст скопирован в буфер', 'success');
-  }).catch(() => {
-    const ta = document.createElement('textarea');
-    ta.value = lines.join('\n');
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    ta.remove();
-    toast('✅ Текст скопирован', 'success');
-  });
-}
-
-// ═══════════════════ GLOBAL SEARCH ════════════════
+// ═══════════════════ SEARCH ══════════════════════
 
 function initSearch() {
-  const input = el('globalSearch');
-  const drop  = el('searchDropdown');
-  if (!input || !drop) return;
+  const inp  = el('globalSearch');
+  const drop = el('searchDropdown');
+  if (!inp || !drop) return;
 
-  input.addEventListener('input', () => {
-    const q = input.value.trim().toLowerCase();
-    if (!q) { drop.classList.remove('open'); return; }
-
+  inp.addEventListener('input', () => {
+    const q = inp.value.trim().toLowerCase();
+    if (!q || !S.data.length) { drop.classList.remove('open'); return; }
     const matches = S.data.filter(e =>
-      e.name.toLowerCase().includes(q) ||
-      e.dept.toLowerCase().includes(q) ||
-      e.sv.toLowerCase().includes(q)
+      e.name.toLowerCase().includes(q) || (e.sv||'').toLowerCase().includes(q) || (e.rg||'').toLowerCase().includes(q)
     ).slice(0, 8);
-
     if (!matches.length) {
-      drop.innerHTML = '<div class="search-no-results">Ничего не найдено</div>';
+      drop.innerHTML = '<div class="search-no-res">Не найдено</div>';
     } else {
       drop.innerHTML = matches.map(e => {
         const sc = getScheduleOn(e);
-        return `
-          <div class="search-result-item" onclick="input.value='';drop.classList.remove('open');navigate('employee',{id:'${e.id}'})">
-            <div class="search-result-avatar" style="background:${e.color}20;color:${e.color};">
-              ${e.name.split(' ').slice(0,2).map(w=>w[0]).join('')}
-            </div>
-            <div class="search-result-info">
-              <div class="search-result-name">${e.name}</div>
-              <div class="search-result-meta">${e.dept} · ${badge(sc.status)}</div>
-            </div>
-          </div>
-        `;
+        return `<div class="search-item" onclick="inp.value='';drop.classList.remove('open');navigate('employee',{id:'${e.name}'})">
+          <div class="search-ava" style="background:${e.color}22;color:${e.color};">${e.name.split(' ').slice(0,2).map(w=>w[0]).join('')}</div>
+          <div><div class="search-name">${e.name}</div><div class="search-meta">${e.rg||''} · ${badge(sc.status)}</div></div>
+        </div>`;
       }).join('');
     }
     drop.classList.add('open');
   });
 
-  document.addEventListener('click', e => {
-    if (!input.contains(e.target) && !drop.contains(e.target)) {
-      drop.classList.remove('open');
-    }
+  document.addEventListener('click', ev => {
+    if (!inp.contains(ev.target) && !drop.contains(ev.target)) drop.classList.remove('open');
   });
-
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { drop.classList.remove('open'); input.value = ''; }
-  });
+  inp.addEventListener('keydown', ev => { if(ev.key==='Escape'){ drop.classList.remove('open'); inp.value=''; } });
 }
 
-// ═══════════════════ DATE NAVIGATION ═════════════
+// ═══════════════════ DATE NAV ════════════════════
 
 function updateDateDisplay() {
   const d = S.date;
-  const label = `${d.getDate()} ${MONTHS_GEN[d.getMonth()]} ${d.getFullYear()}`;
-  const dateBtn = el('dateDisplay');
-  if (dateBtn) dateBtn.textContent = label;
+  const btn = el('dateDisplay');
+  if (btn) btn.textContent = `${d.getDate()} ${MONTHS_GEN[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 function initDateNav() {
-  el('prevDateBtn') && el('prevDateBtn').addEventListener('click', () => {
-    S.date = addDays(S.date, -1);
-    updateDateDisplay();
-    renderCurrentPage();
-  });
-  el('nextDateBtn') && el('nextDateBtn').addEventListener('click', () => {
-    S.date = addDays(S.date, 1);
-    updateDateDisplay();
-    renderCurrentPage();
-  });
-  el('todayBtn') && el('todayBtn').addEventListener('click', () => {
-    S.date = new Date();
-    updateDateDisplay();
-    renderCurrentPage();
-  });
-}
-
-function renderCurrentPage() {
-  navigate(S.page);
+  el('prevDateBtn') && el('prevDateBtn').addEventListener('click', () => { S.date=addDays(S.date,-1); updateDateDisplay(); if(S.page!=='calendar') navigate(S.page); });
+  el('nextDateBtn') && el('nextDateBtn').addEventListener('click', () => { S.date=addDays(S.date,+1); updateDateDisplay(); if(S.page!=='calendar') navigate(S.page); });
+  el('todayBtn')    && el('todayBtn').addEventListener('click',    () => { S.date=new Date();       updateDateDisplay(); if(S.page!=='calendar') navigate(S.page); });
 }
 
 // ═══════════════════ SIDEBAR ═════════════════════
 
 function initSidebar() {
-  const ham     = el('hamburger');
-  const close   = el('sidebarClose');
-  const overlay = el('sidebarOverlay');
-  const sidebar = el('sidebar');
-
-  function open()  { sidebar.classList.add('open'); overlay.classList.add('open'); }
-  function close_()  { sidebar.classList.remove('open'); overlay.classList.remove('open'); }
-
-  ham     && ham.addEventListener('click', open);
-  close   && close.addEventListener('click', close_);
-  overlay && overlay.addEventListener('click', close_);
-
-  // Nav links
-  qsa('.nav-link').forEach(link => {
-    link.addEventListener('click', e => {
-      e.preventDefault();
-      const page = link.dataset.page;
-      if (page) navigate(page);
-      if (window.innerWidth < 768) close_();
-    });
-  });
+  const open_  = () => { el('sidebar').classList.add('open'); el('sidebarOverlay').classList.add('open'); };
+  const close_ = () => { el('sidebar').classList.remove('open'); el('sidebarOverlay').classList.remove('open'); };
+  el('hamburger')     && el('hamburger').addEventListener('click', open_);
+  el('sidebarClose')  && el('sidebarClose').addEventListener('click', close_);
+  el('sidebarOverlay')&& el('sidebarOverlay').addEventListener('click', close_);
+  qsa('.nav-link').forEach(l => l.addEventListener('click', e => {
+    e.preventDefault();
+    if (l.dataset.page) navigate(l.dataset.page);
+    if (window.innerWidth < 768) close_();
+  }));
 }
 
-// ═══════════════════ THEME ═══════════════════════
+function updateSidebarStatus() {
+  const s = el('sidebarStatus');
+  if (!s) return;
+  s.textContent = S.data.length ? `${S.data.length} сотрудников` : 'Нет данных';
+}
+
+// ═══════════════════ THEME & UI ══════════════════
 
 function applyTheme() {
   document.documentElement.setAttribute('data-theme', S.theme);
-  const btn = el('themeBtn');
-  if (btn) btn.textContent = S.theme === 'dark' ? '☀️' : '🌙';
+  const b = el('themeBtn');
+  if (b) b.textContent = S.theme==='dark' ? '☀️' : '🌙';
 }
 
-function toggleTheme() {
-  S.theme = S.theme === 'light' ? 'dark' : 'light';
-  applyTheme();
-  savePrefs();
-}
-
-function toggleCompact() {
-  S.compact = !S.compact;
-  document.body.classList.toggle('compact', S.compact);
-  const btn = el('compactBtn');
-  if (btn) btn.classList.toggle('active', S.compact);
-  savePrefs();
-}
-
-function toggleFullscreen() {
-  if (!document.fullscreenElement) {
-    document.documentElement.requestFullscreen().catch(() => {});
-  } else {
-    document.exitFullscreen().catch(() => {});
-  }
-}
+function toggleTheme() { S.theme = S.theme==='light'?'dark':'light'; applyTheme(); savePrefs(); }
+function toggleCompact() { S.compact=!S.compact; document.body.classList.toggle('compact',S.compact); const b=el('compactBtn');b&&b.classList.toggle('active',S.compact); savePrefs(); }
+function toggleFullscreen() { if(!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{}); else document.exitFullscreen(); }
 
 // ═══════════════════ LEGEND ══════════════════════
 
 function initLegend() {
   const list = el('legendList');
-  if (list) {
-    list.innerHTML = LEGEND_ITEMS.map(item => `
-      <div class="legend-item">
-        <div class="legend-dot" style="background:${item.color};"></div>
-        <span class="legend-label">${item.label}</span>
-      </div>
-    `).join('');
-  }
-  el('legendToggle') && el('legendToggle').addEventListener('click', () => {
-    el('legendPanel').classList.toggle('hidden');
-  });
+  if (list) list.innerHTML = LEGEND_ITEMS.map(it=>`
+    <div class="legend-item"><div class="legend-dot" style="background:${it.color};"></div><span>${it.label}</span></div>`).join('');
+  el('legendToggle') && el('legendToggle').addEventListener('click', () => el('legendPanel').classList.toggle('hidden'));
+}
+
+// ═══════════════════ UTILS ═══════════════════════
+
+function emptyState(title, sub, icon='📭') {
+  return `<div class="empty-state"><div class="empty-icon">${icon}</div><div class="empty-title">${title}</div>${sub?`<div class="empty-sub">${sub}</div>`:''}</div>`;
 }
 
 // ═══════════════════ INIT ════════════════════════
 
 function init() {
-  // Load prefs
-  loadPrefs();
+  loadAll();
   applyTheme();
-  if (S.compact) { document.body.classList.add('compact'); el('compactBtn') && el('compactBtn').classList.add('active'); }
+  if (S.compact) { document.body.classList.add('compact'); el('compactBtn')&&el('compactBtn').classList.add('active'); }
 
-  // Load data
-  const saved = loadData();
-  S.data = (saved && saved.length) ? saved : buildMockData();
-  if (!saved || !saved.length) saveData(S.data);
+  COLOR_MAP = buildColorMap(S.data);
+  S.data.forEach(e => { if (!e.color) e.color = COLOR_MAP[e.name] || '#3b82f6'; });
 
-  // Set today
-  S.date = new Date();
+  S.date     = new Date();
   S.calYear  = S.date.getFullYear();
   S.calMonth = S.date.getMonth();
   updateDateDisplay();
 
-  // Init modules
   initSidebar();
   initDateNav();
   initSearch();
   initLegend();
 
-  // Theme btn
-  el('themeBtn') && el('themeBtn').addEventListener('click', toggleTheme);
-  el('compactBtn') && el('compactBtn').addEventListener('click', toggleCompact);
+  el('themeBtn')      && el('themeBtn').addEventListener('click', toggleTheme);
+  el('compactBtn')    && el('compactBtn').addEventListener('click', toggleCompact);
   el('fullscreenBtn') && el('fullscreenBtn').addEventListener('click', toggleFullscreen);
+  el('modalClose')    && el('modalClose').addEventListener('click', closeModal);
+  el('modalBackdrop') && el('modalBackdrop').addEventListener('click', ev => { if(ev.target===el('modalBackdrop')) closeModal(); });
 
-  // Modal close
-  el('modalClose') && el('modalClose').addEventListener('click', closeModal);
-  el('modalBackdrop') && el('modalBackdrop').addEventListener('click', e => {
-    if (e.target === el('modalBackdrop')) closeModal();
+  // Timeline action buttons
+  el('scrollNowBtn')    && el('scrollNowBtn').addEventListener('click', () => { const s=el('tlScroll'); if(s){ const nx=nowX(); if(nx>=0) s.scrollLeft=Math.max(0,nx-200); } });
+  el('tlExportImgBtn')  && el('tlExportImgBtn').addEventListener('click', () => captureAndSave('tlWrap', `Timeline_${dateKey(S.date)}.png`));
+  el('brkExportImgBtn') && el('brkExportImgBtn').addEventListener('click', () => captureAndSave('breaksCard', `Перерывы_${dateKey(S.date)}.png`));
+
+  // Employee filters
+  ['empSearch','empRGFilter','empSVFilter','empShiftFilter','empStatusFilter'].forEach(id => {
+    const node = el(id);
+    if (node) node.addEventListener(node.tagName==='SELECT'?'change':'input', applyEmpFilters);
   });
 
-  // scroll-to-now btn
-  el('scrollNowBtn') && el('scrollNowBtn').addEventListener('click', scrollToNow);
+  // Calendar filters
+  ['calEmpFilter','calRGFilter'].forEach(id => {
+    const node = el(id);
+    if (node) node.addEventListener('change', renderCalendar);
+  });
 
-  // Route
+  // Timeline filters
+  ['tlRGFilter','tlSVFilter','tlShiftFilter'].forEach(id => {
+    const node = el(id);
+    if (node) node.addEventListener('change', renderTimeline);
+  });
+
+  // Breaks filters
+  ['brkRGFilter','brkSVFilter'].forEach(id => {
+    const node = el(id);
+    if (node) node.addEventListener('change', renderBreaksPage);
+  });
+
+  updateSidebarStatus();
   handleHash();
   window.addEventListener('hashchange', handleHash);
 
-  // Auto-refresh now-line every minute
+  // Auto-refresh now-line every minute when timeline is open
   setInterval(() => {
-    if (S.page === 'timeline' && sameDay(S.date, new Date())) renderTimeline();
+    if (S.page==='timeline' && sameDay(S.date, new Date())) renderTimeline();
   }, 60000);
 
-  // Expose navigate globally for inline onclick
-  window.navigate = navigate;
-  window.S = S;
+  // Expose globals needed for inline onclick
+  window.navigate    = navigate;
+  window.S           = S;
+  window.el          = el;
+  window.dateKey     = dateKey;
+  window.calNav      = calNav;
+  window.captureAndSave  = captureAndSave;
+  window.captureAndPDF   = captureAndPDF;
+  window.exportJSON      = exportJSON;
+  window.exportScheduleExcel = exportScheduleExcel;
+  window.exportBreaksExcel   = exportBreaksExcel;
+  window.exportTextReport    = exportTextReport;
 
-  console.info('KAORZIP initialized. Employees:', S.data.length);
+  console.info(`KAORZIP ready — Schedule: ${S.data.length} | Breaks: ${S.breaks.length}`);
 }
 
 document.addEventListener('DOMContentLoaded', init);
