@@ -71,6 +71,8 @@ let S = {
   calYear:  null,
   calMonth: null,
   currentEmpId: null,
+  tlCollapsed:  {},  // group name → collapsed state
+  tlScrollLeft: 0,   // saved horizontal scroll position
 };
 let _internalNav = false; // guard against hashchange loop
 
@@ -553,28 +555,36 @@ async function captureAndSave(elementId, filename, caption='') {
   if (!node) { toast('Нечего сохранять', 'warning'); return; }
   toast('⏳ Генерация изображения…');
   try {
-    // Force load all scroll content
-    const oldOverflow = node.style.overflow;
+    // Auto-scale: large datasets get smaller scale so PNG stays readable
+    const sH = node.scrollHeight;
+    const sW = node.scrollWidth;
+    const targetMaxPx = 7000;
+    const baseScale = 1.6;
+    const fit = Math.min(targetMaxPx / sH, targetMaxPx / sW, 1);
+    const scale = Math.max(0.7, baseScale * fit);
+
+    // Render full scroll content (so all rows are captured) but with bounded resolution
+    const scrolls = qsa('.tl-scroll, .brk-scroll-wrap', node);
+    scrolls.forEach(s => { s.dataset._prevOv = s.style.overflow; s.style.overflow = 'visible'; });
+    const oldNodeOv = node.style.overflow;
     node.style.overflow = 'visible';
-    qsa('.tl-scroll, .brk-scroll-wrap', node).forEach(s => { s.dataset._prevOv = s.style.overflow; s.style.overflow = 'visible'; });
 
     const canvas = await html2canvas(node, {
-      scale: 2,
+      scale,
       backgroundColor: '#ffffff',
       useCORS: true,
       logging: false,
-      windowWidth: Math.max(node.scrollWidth, 1920),
+      windowWidth: Math.max(sW, 1920),
     });
 
-    // Restore
-    node.style.overflow = oldOverflow;
-    qsa('.tl-scroll, .brk-scroll-wrap', node).forEach(s => { s.style.overflow = s.dataset._prevOv || ''; });
+    node.style.overflow = oldNodeOv;
+    scrolls.forEach(s => { s.style.overflow = s.dataset._prevOv || ''; });
 
     const a = document.createElement('a');
     a.download = filename;
     a.href = canvas.toDataURL('image/png');
     a.click();
-    toast('✅ Изображение сохранено', 'success');
+    toast(`✅ Сохранено (${canvas.width}×${canvas.height})`, 'success');
   } catch(e) { toast('❌ Ошибка: ' + e.message, 'error'); }
 }
 
@@ -738,8 +748,10 @@ function getUniqueVals(arr, key) {
 
 function populateSelect(id, vals) {
   const s = el(id); if (!s) return;
+  const current = s.value;
   const first = s.options[0] ? s.options[0].outerHTML : '';
   s.innerHTML = first + vals.map(v=>`<option value="${v}">${v}</option>`).join('');
+  if (current && vals.includes(current)) s.value = current;
 }
 
 function filterEmps(opts={}) {
@@ -808,18 +820,18 @@ function renderDashboard() {
   const isLive  = isToday(S.date);
 
   const cards = [
-    { icon:'👥', label:'Всего в системе', v: display.length, color:'#3b82f6', meta:'' },
-    { icon:'✅', label:'Работают',         v: active,         color:'#10b981', meta:`из ${display.length}` },
-    ...(isLive ? [{ icon:'☕', label:'Сейчас на перерыве', v: onBreak.length, color:'#f59e0b', meta:'в реальном времени' }] : []),
-    { icon:'🌙', label:'Ночная смена',     v: counts.night,   color:'#8b5cf6', meta:'' },
-    { icon:'🔄', label:'Изм. смены',       v: counts.changed, color:'#10b981', meta:'' },
-    { icon:'🏖️', label:'Отпуск',           v: counts.vac,     color:'#64748b', meta:'' },
-    { icon:'🤒', label:'Больничный',       v: counts.sick,    color:'#ef4444', meta:'' },
-    { icon:'⚠️', label:'Неявка',           v: counts.absence, color:'#dc2626', meta:'' },
+    { icon:'👥', label:'Всего в системе', v: display.length, color:'#3b82f6', meta:'', filter:'all' },
+    { icon:'✅', label:'Работают',         v: active,         color:'#10b981', meta:`из ${display.length}`, filter:'work' },
+    ...(isLive ? [{ icon:'☕', label:'Сейчас на перерыве', v: onBreak.length, color:'#f59e0b', meta:'в реальном времени', filter:'break' }] : []),
+    { icon:'🌙', label:'Ночная смена',     v: counts.night,   color:'#8b5cf6', meta:'', filter:'night' },
+    { icon:'🔄', label:'Изм. смены',       v: counts.changed, color:'#10b981', meta:'', filter:'changed' },
+    { icon:'🏖️', label:'Отпуск',           v: counts.vac,     color:'#64748b', meta:'', filter:'ОТ' },
+    { icon:'🤒', label:'Больничный',       v: counts.sick,    color:'#ef4444', meta:'', filter:'БЛ' },
+    { icon:'⚠️', label:'Неявка',           v: counts.absence, color:'#dc2626', meta:'', filter:'НЯ' },
   ];
 
   const statsHTML = `<div class="stats-grid">${
-    cards.map(c=>`<div class="stat-card">
+    cards.map(c=>`<div class="stat-card stat-card-click" onclick="showDashFilter('${c.filter}')" title="Показать список">
       <div class="stat-card-icon" style="background:${c.color}18;">${c.icon}</div>
       <div class="stat-card-label">${c.label}</div>
       <div class="stat-card-value" style="color:${c.color};">${c.v}</div>
@@ -915,6 +927,54 @@ function renderDashboard() {
   `);
 }
 
+window.showDashFilter = function(filter) {
+  const dk = dateKey(S.date);
+  const rgF = (el('dashDeptFilter')||{}).value||'';
+  const base = rgF ? S.data.filter(e=>e.rg===rgF) : S.data;
+
+  let title, emps;
+  switch (filter) {
+    case 'all':     title='Все сотрудники';                    emps = base; break;
+    case 'work':    title='Работают сегодня';                  emps = base.filter(e=>{const st=(e.schedule[dk]||{}).status; return st==='work'||st==='21'||st==='9';}); break;
+    case 'night':   title='Ночная смена';                      emps = base.filter(e=>(e.schedule[dk]||{}).status==='21'); break;
+    case 'changed': title='Изменение смены';                   emps = base.filter(e=>(e.schedule[dk]||{}).status==='9'); break;
+    case 'ОТ':      title='Отпуск';                            emps = base.filter(e=>(e.schedule[dk]||{}).status==='ОТ'); break;
+    case 'БЛ':      title='Больничный';                        emps = base.filter(e=>(e.schedule[dk]||{}).status==='БЛ'); break;
+    case 'НЯ':      title='Неявка';                            emps = base.filter(e=>(e.schedule[dk]||{}).status==='НЯ'); break;
+    case 'break': {
+      const onBreak = getCurrentlyOnBreak();
+      title = 'Сейчас на перерыве';
+      emps = onBreak.map(b => {
+        const emp = S.data.find(e => e.name.startsWith(b.name.substring(0,12)) || b.name.startsWith(e.name.substring(0,12)));
+        return emp ? { ...emp, _brk: b } : null;
+      }).filter(Boolean);
+      break;
+    }
+    default: return;
+  }
+
+  if (!emps.length) { toast('Нет сотрудников в этой категории'); return; }
+
+  const body = `<div style="max-height:60vh;overflow-y:auto;">
+    ${emps.map(e => {
+      const sc = e.schedule ? (e.schedule[dk]||{status:'off'}) : {status:'off'};
+      const safe = e.name.replace(/'/g,"\\'");
+      const brkInfo = e._brk ? `<span class="badge" style="background:#f59e0b22;color:#b45309;">${e._brk.type} ${e._brk.start}–${e._brk.end}</span>` : '';
+      const timeInfo = sc.shiftStart ? `<span class="txt-sm txt-muted" style="margin-right:6px;">${sc.shiftStart}–${sc.shiftEnd}</span>` : '';
+      return `<div class="emp-row" onclick="closeModal();navigate('employee',{id:'${safe}'})">
+        ${avatarHTML(e.name, e.color||'#3b82f6', 34)}
+        <div class="emp-info">
+          <div class="emp-name">${e.name}</div>
+          <div class="emp-meta">СВ: <b>${e.sv||'—'}</b> · ${e.rg||''}</div>
+        </div>
+        ${timeInfo}
+        ${brkInfo || badge(sc.status)}
+      </div>`;
+    }).join('')}
+  </div>`;
+  openModal(`${title} (${emps.length})`, body);
+};
+
 // ═══════════════════ TIMELINE ════════════════════
 
 function renderTimeline() {
@@ -962,18 +1022,18 @@ function renderTimeline() {
       html += `<div class="tl-block ${cls}" style="left:${x}px;width:${w}px;" data-tip="${STATUS_LABEL[sc.status]}|${sc.shiftStart}–${sc.shiftEnd}">${label}</div>`;
 
       // Breaks from file 2 if available, else lunch from schedule
+      // Per UX request: no time text on timeline break blocks — keep them visual only
       if (brk && brk.breaks && brk.breaks.length) {
         brk.breaks.forEach(b => {
           const bx = tStrToX(b.start);
           const bw = tDurPx(b.start, b.end);
           if (bx < 0) return;
           const col = BREAK_COLORS[b.type]||'#f59e0b';
-          const bLabel = bw > 50 ? b.start : '';
-          html += `<div class="tl-block tl-b-break" style="left:${bx}px;width:${Math.max(bw,6)}px;background:${col};" data-tip="${b.type}|${b.start}–${b.end}">${bLabel}</div>`;
+          html += `<div class="tl-block tl-b-break" style="left:${bx}px;width:${Math.max(bw,6)}px;background:${col};" data-tip="${b.type}|${b.start}–${b.end}"></div>`;
         });
       } else if (sc.lunchHour) {
         const lx = tStrToX(`${pad(sc.lunchHour)}:00`);
-        html += `<div class="tl-block tl-b-break" style="left:${lx}px;width:${60*TL_PX_MIN}px;background:#f97316;" data-tip="Обед|${pad(sc.lunchHour)}:00–${pad(sc.lunchHour+1)}:00">${pad(sc.lunchHour)}:00</div>`;
+        html += `<div class="tl-block tl-b-break" style="left:${lx}px;width:${60*TL_PX_MIN}px;background:#f97316;" data-tip="Обед|${pad(sc.lunchHour)}:00–${pad(sc.lunchHour+1)}:00"></div>`;
       }
     } else if (isLeave) {
       const TL_W = (TL_END-TL_START)*TL_PX_MIN;
@@ -995,8 +1055,8 @@ function renderTimeline() {
   const TL_W = (TL_END - TL_START) * TL_PX_MIN;
 
   const rowsHTML = Object.entries(groupMap).map(([grp, emps]) => `
-    <div class="tl-group">
-      <div class="tl-group-hdr" onclick="this.parentElement.classList.toggle('tl-collapsed')">
+    <div class="tl-group${S.tlCollapsed[grp]?' tl-collapsed':''}">
+      <div class="tl-group-hdr" data-grp="${grp.replace(/"/g,'&quot;')}" onclick="tlToggleGroup(this)">
         <span class="tl-collapse-ico">▼</span>
         <span>${grp}</span>
         <span class="tl-group-count">${emps.length} чел.</span>
@@ -1044,14 +1104,24 @@ function renderTimeline() {
 
   initTooltips();
 
-  // Auto-scroll to now
-  if (isToday_ && nx > 0) {
-    setTimeout(() => {
-      const s = el('tlScroll');
-      if (s) s.scrollLeft = Math.max(0, nx - 200);
-    }, 80);
+  // Restore scroll position; if first visit and today, auto-scroll to "now"
+  const tlScr = el('tlScroll');
+  if (tlScr) {
+    if (S.tlScrollLeft > 0) {
+      setTimeout(() => { tlScr.scrollLeft = S.tlScrollLeft; }, 0);
+    } else if (isToday_ && nx > 0) {
+      setTimeout(() => { tlScr.scrollLeft = Math.max(0, nx - 200); }, 80);
+    }
+    tlScr.addEventListener('scroll', () => { S.tlScrollLeft = tlScr.scrollLeft; }, { passive: true });
   }
 }
+
+window.tlToggleGroup = function(hdr) {
+  const grp = hdr.dataset.grp;
+  const wrap = hdr.parentElement;
+  wrap.classList.toggle('tl-collapsed');
+  S.tlCollapsed[grp] = wrap.classList.contains('tl-collapsed');
+};
 
 function initTooltips() {
   let tip = el('tlTip');
@@ -1175,7 +1245,10 @@ function renderBreaksPage() {
       const bw = tDurPx(br.start, br.end);
       const bc = BREAK_COLORS[br.type]||'#f59e0b';
       const safe = b.name.replace(/'/g,"\\'");
-      return `<div class="brk-seg" style="left:${bx}px;width:${Math.max(bw,8)}px;background:${bc};" title="${br.type}: ${br.start}–${br.end} · кликни для редактирования" onclick="showBreakEdit('${safe}','${br.start}','${br.end}','${br.type}')"><span class="brk-seg-lbl">${bw>40?br.start:''}</span></div>`;
+      // Always show time. Wide segs (>34px) fit "HH:MM" inside. Narrow segs get the time below.
+      const inside = bw > 34 ? `<span class="brk-seg-lbl">${bw > 92 ? `${br.start}–${br.end}` : br.start}</span>` : '';
+      const below  = bw <= 34 ? `<span class="brk-seg-lbl-below">${br.start}</span>` : '';
+      return `<div class="brk-seg" style="left:${bx}px;width:${Math.max(bw,8)}px;background:${bc};" title="${br.type}: ${br.start}–${br.end} · кликни для редактирования" onclick="showBreakEdit('${safe}','${br.start}','${br.end}','${br.type}')">${inside}${below}</div>`;
     }).join('');
 
     const safeNav = (emp?.name||b.name).replace(/'/g,"\\'");
@@ -2067,6 +2140,9 @@ function init() {
     const node = el(id);
     if (node) node.addEventListener('change', renderBreaksPage);
   });
+
+  // Dashboard filter
+  el('dashDeptFilter') && el('dashDeptFilter').addEventListener('change', renderDashboard);
 
   updateSidebarStatus();
   handleHash();
