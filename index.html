@@ -120,6 +120,7 @@
           <div><h1 class="page-title">Dashboard</h1><p class="page-subtitle" id="dashSubtitle"></p></div>
           <div class="page-actions">
             <select class="select-sm" id="dashDeptFilter"><option value="">Все группы</option></select>
+            <button class="btn btn-sm btn-ghost" onclick="resetFilters('dashboard')">✕ Сбросить</button>
           </div>
         </div>
         <div id="dashContent"></div>
@@ -139,7 +140,7 @@
               <option value="3 см">3 смена</option>
             </select>
             <button class="btn btn-sm btn-outline" id="scrollNowBtn">⏰ Сейчас</button>
-            <button class="btn btn-sm btn-primary" id="tlExportImgBtn">📷 Сохранить PNG</button>
+            <button class="btn btn-sm btn-ghost" onclick="resetFilters('timeline')">✕ Сбросить</button>
           </div>
         </div>
         <div id="timelineContent"></div>
@@ -152,7 +153,7 @@
           <div class="page-actions">
             <select class="select-sm" id="brkRGFilter"><option value="">Все РГ</option></select>
             <select class="select-sm" id="brkSVFilter"><option value="">Все СВ</option></select>
-            <button class="btn btn-sm btn-primary" id="brkExportImgBtn">📷 Сохранить PNG</button>
+            <button class="btn btn-sm btn-ghost" onclick="resetFilters('breaks')">✕ Сбросить</button>
           </div>
         </div>
         <div id="breaksContent"></div>
@@ -165,6 +166,7 @@
           <div class="page-actions">
             <select class="select-sm" id="calEmpFilter"><option value="">Все сотрудники</option></select>
             <select class="select-sm" id="calRGFilter"><option value="">Все РГ</option></select>
+            <button class="btn btn-sm btn-ghost" onclick="resetFilters('calendar')">✕ Сбросить</button>
           </div>
         </div>
         <div id="calendarContent"></div>

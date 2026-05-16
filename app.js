@@ -156,8 +156,12 @@ function openModal(title, body) {
   el('modalTitle').textContent = title;
   setHTML('modalBody', body);
   el('modalBackdrop').classList.remove('hidden');
+  document.body.style.overflow = 'hidden'; // prevent background scroll
 }
-function closeModal() { el('modalBackdrop').classList.add('hidden'); }
+function closeModal() {
+  el('modalBackdrop').classList.add('hidden');
+  document.body.style.overflow = '';
+}
 
 // ═══════════════════ COLOR MAP ═══════════════════
 
@@ -1245,10 +1249,10 @@ function renderBreaksPage() {
       const bw = tDurPx(br.start, br.end);
       const bc = BREAK_COLORS[br.type]||'#f59e0b';
       const safe = b.name.replace(/'/g,"\\'");
-      // Always show time. Wide segs (>34px) fit "HH:MM" inside. Narrow segs get the time below.
-      const inside = bw > 34 ? `<span class="brk-seg-lbl">${bw > 92 ? `${br.start}–${br.end}` : br.start}</span>` : '';
-      const below  = bw <= 34 ? `<span class="brk-seg-lbl-below">${br.start}</span>` : '';
-      return `<div class="brk-seg" style="left:${bx}px;width:${Math.max(bw,8)}px;background:${bc};" title="${br.type}: ${br.start}–${br.end} · кликни для редактирования" onclick="showBreakEdit('${safe}','${br.start}','${br.end}','${br.type}')">${inside}${below}</div>`;
+      // Always show time inside the block. Wide blocks get full range, narrow just start.
+      // overflow:visible on the block means the label won't be clipped.
+      const lbl = bw > 92 ? `${br.start}–${br.end}` : br.start;
+      return `<div class="brk-seg" style="left:${bx}px;width:${Math.max(bw,8)}px;background:${bc};" title="${br.type}: ${br.start}–${br.end} · кликни для редактирования" onclick="showBreakEdit('${safe}','${br.start}','${br.end}','${br.type}')"><span class="brk-seg-lbl">${lbl}</span></div>`;
     }).join('');
 
     const safeNav = (emp?.name||b.name).replace(/'/g,"\\'");
@@ -1352,85 +1356,135 @@ window.deleteBreak = function(empName, idx) {
 function renderCalendar() {
   if (S.calYear===null) { S.calYear=S.date.getFullYear(); S.calMonth=S.date.getMonth(); }
 
-  const rgs = getUniqueVals(S.data,'rg');
+  const rgs  = getUniqueVals(S.data,'rg');
   const emps = S.data.map(e=>e.name).sort();
   populateSelect('calRGFilter', rgs);
   populateSelect('calEmpFilter', emps);
 
   const selEmp = (el('calEmpFilter')||{}).value||'';
   const selRG  = (el('calRGFilter')||{}).value||'';
-  let dispEmps = selEmp ? S.data.filter(e=>e.name===selEmp)
-               : selRG  ? S.data.filter(e=>e.rg===selRG)
-               : S.data;
 
-  const y=S.calYear, m=S.calMonth;
+  const y = S.calYear, m = S.calMonth;
   const dim = new Date(y,m+1,0).getDate();
   const firstDow = (new Date(y,m,1).getDay()+6)%7; // Mon=0
   const prevDim  = new Date(y,m,0).getDate();
 
-  const dayHeaders = DAYS_RU.slice(1).concat(DAYS_RU[0]).map(d=>`<div class="cal-day-hdr">${d}</div>`).join('');
-
+  const dayHeaders = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(d=>`<div class="cal-day-hdr">${d}</div>`).join('');
   const cells = [];
   for(let i=0;i<firstDow;i++) cells.push({d:prevDim-firstDow+i+1,m:m-1,y,other:true});
   for(let d=1;d<=dim;d++) cells.push({d,m,y,other:false});
   while((cells.length%7)!==0) { const d=cells.length-firstDow-dim+1; cells.push({d,m:m+1,y,other:true}); }
 
-  const cellsHTML = cells.map(c=>{
+  if (selEmp) {
+    const emp = S.data.find(e=>e.name===selEmp);
+    renderPersonalCalendar(emp, cells, y, m, dim, dayHeaders);
+  } else {
+    const base = selRG ? S.data.filter(e=>e.rg===selRG) : S.data;
+    renderHeatmapCalendar(base, cells, y, m, dim, dayHeaders);
+  }
+}
+
+function renderHeatmapCalendar(base, cells, y, m, dim, dayHeaders) {
+  const cellsHTML = cells.map(c => {
     const date = new Date(c.y,c.m,c.d);
     const dk   = dateKey(date);
     const isT  = isToday(date);
     const isSel= sameDay(date,S.date);
 
-    const evs = dispEmps.slice(0,3).map(e=>{
-      const sc=e.schedule[dk];
-      if(!sc||sc.status==='off') return null;
-      const col=STATUS_COLOR[sc.status]||'#94a3b8';
-      return `<div class="cal-ev" style="background:${col}20;color:${col};">${STATUS_LABEL[sc.status]||sc.status}</div>`;
-    }).filter(Boolean);
+    if (c.other) return `<div class="cal-day cal-day-other" onclick="calClick(${c.y},${c.m},${c.d})"><div class="cal-day-num">${c.d}</div></div>`;
 
-    return `<div class="cal-day${c.other?' cal-day-other':''}${isT?' cal-day-today':''}${isSel&&!isT?' cal-day-sel':''}" onclick="calClick(${c.y},${c.m},${c.d})">
+    const total   = base.length;
+    const working = total ? base.filter(e=>{ const st=(e.schedule[dk]||{}).status||'off'; return st==='work'||st==='21'||st==='9'; }).length : 0;
+    const absent  = total ? base.filter(e=>{ const st=(e.schedule[dk]||{}).status||'off'; return ['ОТ','БЛ','НЯ','УО','ОЗ'].includes(st); }).length : 0;
+    const pct     = total ? working/total : 0;
+    const hCol    = pct>=0.8?'#10b981':pct>=0.5?'#f59e0b':pct>0?'#ef4444':'#94a3b8';
+
+    return `<div class="cal-day${isT?' cal-day-today':''}${isSel&&!isT?' cal-day-sel':''}" onclick="calClick(${c.y},${c.m},${c.d})">
       <div class="cal-day-num">${c.d}</div>
-      <div class="cal-day-evs">${evs.join('')}</div>
+      ${total>0?`
+        <div class="cal-heat-bar" style="background:${hCol}33;border-left:3px solid ${hCol};"></div>
+        <div class="cal-heat-count" style="color:${hCol};">${working}<span class="cal-heat-total">/${total}</span></div>
+        ${absent?`<div class="cal-ev" style="background:#64748b14;color:#64748b;">Отс.: ${absent}</div>`:''}
+      `:''}
     </div>`;
   }).join('');
 
-  // Month summary for selected employee
-  let summaryHTML = '';
-  if (selEmp) {
-    const emp = S.data.find(e=>e.name===selEmp);
-    if (emp) {
-      const cnt={work:0,night:0,vac:0,sick:0,off:0};
-      for(let d=1;d<=dim;d++){
-        const dk=`${y}-${pad(m+1)}-${pad(d)}`;
-        const sc=emp.schedule[dk]||{status:'off'};
-        if(sc.status==='work'||sc.status==='9') cnt.work++;
-        else if(sc.status==='21') cnt.night++;
-        else if(sc.status==='ОТ') cnt.vac++;
-        else if(sc.status==='БЛ') cnt.sick++;
-        else cnt.off++;
-      }
-      summaryHTML=`<div class="card" style="margin-top:16px;">
-        <div class="card-hdr"><span class="card-title">Итоги ${MONTHS_NOM[m]} — ${emp.name}</span></div>
-        <div class="card-body"><div class="stats-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
-          <div class="stat-card"><div class="stat-card-label">Рабочих</div><div class="stat-card-value" style="color:var(--c-work);">${cnt.work}</div></div>
-          <div class="stat-card"><div class="stat-card-label">Ночных</div><div class="stat-card-value" style="color:var(--c-night);">${cnt.night}</div></div>
-          <div class="stat-card"><div class="stat-card-label">Отпуск</div><div class="stat-card-value" style="color:var(--c-vac);">${cnt.vac}</div></div>
-          <div class="stat-card"><div class="stat-card-label">Больничный</div><div class="stat-card-value" style="color:var(--c-sick);">${cnt.sick}</div></div>
-        </div></div>
-      </div>`;
-    }
-  }
-
   setHTML('calendarContent', `
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+    <div class="cal-nav-row">
       <button class="btn btn-ghost" onclick="calNav(-1)">‹ Пред.</button>
-      <h2 style="font-size:1.1rem;font-weight:700;min-width:160px;text-align:center;">${MONTHS_NOM[m]} ${y}</h2>
+      <h2 class="cal-month-title">${MONTHS_NOM[m]} ${y}</h2>
       <button class="btn btn-ghost" onclick="calNav(1)">След. ›</button>
+    </div>
+    <div class="cal-heat-legend">
+      <span class="cal-leg-item"><b style="color:#10b981;">■</b> ≥80% работают</span>
+      <span class="cal-leg-item"><b style="color:#f59e0b;">■</b> 50–79%</span>
+      <span class="cal-leg-item"><b style="color:#ef4444;">■</b> &lt;50%</span>
+      <span class="cal-leg-item txt-muted">Число = работающие / всего · нажмите на день → Timeline</span>
     </div>
     <div class="card"><div class="card-body">
       <div class="cal-grid">${dayHeaders}${cellsHTML}</div>
     </div></div>
-    ${summaryHTML}
+  `);
+}
+
+function renderPersonalCalendar(emp, cells, y, m, dim, dayHeaders) {
+  if (!emp) { setHTML('calendarContent', emptyState('Сотрудник не найден','','⚠️')); return; }
+
+  const cnt = { work:0, night:0, vac:0, sick:0, other:0, off:0 };
+  for(let d=1;d<=dim;d++){
+    const dk=`${y}-${pad(m+1)}-${pad(d)}`;
+    const sc=emp.schedule[dk]||{status:'off'};
+    if(sc.status==='work'||sc.status==='9') cnt.work++;
+    else if(sc.status==='21') cnt.night++;
+    else if(['ОТ','УО','ОЗ'].includes(sc.status)) cnt.vac++;
+    else if(sc.status==='БЛ') cnt.sick++;
+    else if(sc.status==='НЯ') cnt.other++;
+    else cnt.off++;
+  }
+
+  const cellsHTML = cells.map(c => {
+    const date = new Date(c.y,c.m,c.d);
+    const dk   = dateKey(date);
+    const sc   = emp.schedule[dk]||{status:'off'};
+    const isT  = isToday(date);
+    const isSel= sameDay(date,S.date);
+    const col  = STATUS_COLOR[sc.status]||'#94a3b8';
+
+    return `<div class="cal-day${c.other?' cal-day-other':''}${isT?' cal-day-today':''}${isSel&&!isT?' cal-day-sel':''}" onclick="calClick(${c.y},${c.m},${c.d})">
+      <div class="cal-day-num">${c.d}</div>
+      ${sc.status!=='off'?`
+        <div class="cal-ev" style="background:${col}22;color:${col};">${STATUS_LABEL[sc.status]||sc.status}</div>
+        ${sc.shiftStart?`<div style="font-size:.61rem;color:${col};text-align:center;">${sc.shiftStart}–${sc.shiftEnd}</div>`:''}
+      `:''}
+    </div>`;
+  }).join('');
+
+  const safeName = emp.name.replace(/'/g,"\\'");
+  setHTML('calendarContent', `
+    <div class="cal-nav-row">
+      <button class="btn btn-ghost" onclick="calNav(-1)">‹ Пред.</button>
+      <h2 class="cal-month-title">${MONTHS_NOM[m]} ${y}</h2>
+      <button class="btn btn-ghost" onclick="calNav(1)">След. ›</button>
+    </div>
+    <div class="profile-hdr" style="margin-bottom:14px;padding:14px 18px;">
+      ${avatarHTML(emp.name,emp.color,42)}
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:700;font-size:.95rem;">${emp.name}</div>
+        <div class="txt-muted txt-sm">СВ: <b>${emp.sv||'—'}</b> · РГ: ${emp.rg||'—'} · ${emp.graphSurv||'—'}</div>
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+          <span class="badge badge-work">Раб.: ${cnt.work}</span>
+          <span class="badge badge-night">Ночь: ${cnt.night}</span>
+          ${cnt.vac?`<span class="badge badge-vac">Отп.: ${cnt.vac}</span>`:''}
+          ${cnt.sick?`<span class="badge badge-sick">Б/л: ${cnt.sick}</span>`:''}
+          ${cnt.other?`<span class="badge badge-absence">НЯ: ${cnt.other}</span>`:''}
+          <span class="badge badge-off">Вых.: ${cnt.off}</span>
+        </div>
+      </div>
+      <button class="btn btn-sm btn-ghost" onclick="navigate('employee',{id:'${safeName}'})">Профиль →</button>
+    </div>
+    <div class="card"><div class="card-body">
+      <div class="cal-grid">${dayHeaders}${cellsHTML}</div>
+    </div></div>
   `);
 }
 
@@ -1877,6 +1931,256 @@ window.clearAllData = function() {
   toast('Данные очищены', 'warning');
 };
 
+// ═══════════════════ HTML EXPORT ═════════════════
+
+function downloadHTML(html, filename) {
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const a = document.createElement('a');
+  a.download = filename;
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast(`✅ Сохранён: ${filename}`, 'success');
+}
+
+function exportBreaksHTML() {
+  if (!S.breaks.length && !S.data.length) { toast('Нет данных', 'warning'); return; }
+  const dk = dateKey(S.date);
+  const dateStr = formatDisp(S.date);
+
+  const rows = [];
+  if (S.breaks.length) {
+    S.breaks.forEach(b => {
+      const emp = S.data.find(e => e.name.startsWith(b.name.substring(0,12)) || b.name.startsWith(e.name.substring(0,12)));
+      rows.push({ name:b.name, sv:b.sv||emp?.sv||'', rg:emp?.rg||'', shift:b.shift||'', breaks:(b.breaks||[]) });
+    });
+  } else {
+    S.data.forEach(e => {
+      const sc = e.schedule[dk]||{};
+      if ((sc.status==='work'||sc.status==='9') && sc.lunchHour) {
+        rows.push({ name:e.name, sv:e.sv||'', rg:e.rg||'', shift:`${sc.shiftStart}–${sc.shiftEnd}`, breaks:[{start:`${pad(sc.lunchHour)}:00`,end:`${pad(sc.lunchHour+1)}:00`,type:'обед'}] });
+      }
+    });
+  }
+  if (!rows.length) { toast('Нет данных для экспорта', 'warning'); return; }
+
+  const TW = 700, TS = 8*60, TE = 22*60;
+  const tX = t => { const [h,m]=(t||'0:0').split(':').map(Number); return Math.max(0,((h*60+m)-TS)/(TE-TS)*TW); };
+  const dX = (s,e_) => { const [sh,sm]=s.split(':').map(Number); let [eh,em]=e_.split(':').map(Number); let sd=sh*60+sm,ed=eh*60+em; if(ed<sd)ed+=1440; return Math.max((ed-sd)/(TE-TS)*TW,4); };
+
+  const svs = [...new Set(rows.map(r=>r.sv).filter(Boolean))].sort();
+  const rgs = [...new Set(rows.map(r=>r.rg).filter(Boolean))].sort();
+  const BCOLORS = {'перерыв':'#f59e0b','обед':'#f97316','ужин':'#8b5cf6'};
+  const POOL = ['#6366f1','#8b5cf6','#ec4899','#f43f5e','#f97316','#eab308','#22c55e','#14b8a6','#06b6d4','#3b82f6'];
+
+  const svOpts = svs.map(s=>`<option>${s}</option>`).join('');
+  const rgOpts = rgs.map(s=>`<option>${s}</option>`).join('');
+  const hours  = [8,9,10,11,12,13,14,15,16,17,18,19,20,21,22];
+
+  const dataJSON = JSON.stringify(rows.map(r=>({name:r.name,sv:r.sv,rg:r.rg,shift:r.shift,breaks:(r.breaks||[]).map(b=>({type:b.type,start:b.start,end:b.end}))})));
+
+  const css = `*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0f4f8;color:#0f172a;}
+header{background:#1e293b;color:#f1f5f9;padding:14px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.logo{font-weight:800;font-size:1rem;letter-spacing:.04em;}
+h1{font-size:.95rem;font-weight:700;flex:1;}
+.dt{font-size:.8rem;color:#94a3b8;}
+.bar{padding:10px 22px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;gap:8px;flex-wrap:wrap;align-items:center;position:sticky;top:0;z-index:10;}
+.bar input,.bar select{padding:5px 12px;border:1px solid #e2e8f0;border-radius:20px;font-size:.83rem;outline:none;background:#f8fafc;color:#0f172a;}
+.bar input:focus,.bar select:focus{border-color:#2563eb;}
+.rst{padding:4px 10px;border:1px solid #e2e8f0;border-radius:20px;font-size:.78rem;cursor:pointer;background:none;color:#64748b;}
+.rst:hover{border-color:#2563eb;color:#2563eb;}
+.cnt{font-size:.78rem;color:#64748b;margin-left:auto;}
+.leg{display:flex;gap:10px;flex-wrap:wrap;padding:8px 22px;font-size:.76rem;color:#64748b;}
+.ld{width:10px;height:10px;border-radius:2px;display:inline-block;vertical-align:middle;margin-right:3px;}
+main{padding:14px 22px;}
+.card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:10px;overflow:hidden;}
+.hdr{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid #f0f4f8;}
+.ava{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.76rem;flex-shrink:0;}
+.nm{font-weight:700;font-size:.88rem;}
+.mt{font-size:.74rem;color:#64748b;}
+.sh{margin-left:auto;font-size:.78rem;color:#64748b;white-space:nowrap;}
+.tw{padding:10px 14px 14px;overflow-x:auto;}
+.ax{display:flex;width:${TW}px;margin-bottom:5px;}
+.ax span{flex:1;font-size:.6rem;color:#94a3b8;}
+.tr{position:relative;height:26px;width:${TW}px;}
+.sb{position:absolute;top:50%;transform:translateY(-50%);height:5px;border-radius:3px;}
+.bs{position:absolute;top:50%;transform:translateY(-50%);height:20px;border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:visible;}
+.bl{font-size:.6rem;font-weight:700;color:#fff;white-space:nowrap;padding:0 3px;}
+.empty{text-align:center;padding:50px;color:#94a3b8;}
+@media print{.bar,header{position:static!important;}}`;
+
+  const html = `<!DOCTYPE html>
+<html lang="ru"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>График перерывов — ${dateStr}</title><style>${css}</style></head>
+<body>
+<header><span class="logo">KAORZIP</span><h1>График перерывов</h1><span class="dt">${dateStr}</span></header>
+<div class="bar">
+  <input type="text" id="srch" placeholder="Найти сотрудника… (или нажми /)" oninput="applyF()"/>
+  ${svs.length?`<select id="svF" onchange="applyF()"><option value="">Все СВ</option>${svOpts}</select>`:''}
+  ${rgs.length?`<select id="rgF" onchange="applyF()"><option value="">Все РГ</option>${rgOpts}</select>`:''}
+  <button class="rst" onclick="resetF()">✕ Сбросить</button>
+  <span class="cnt" id="cnt"></span>
+</div>
+<div class="leg">
+  <span><span class="ld" style="background:#f59e0b;"></span>Перерыв</span>
+  <span><span class="ld" style="background:#f97316;"></span>Обед</span>
+  <span><span class="ld" style="background:#8b5cf6;"></span>Ужин</span>
+</div>
+<main id="main"></main>
+<script>
+const DATA=${dataJSON};
+const TW=${TW},TS=${TS},TE=${TE};
+const BC=${JSON.stringify(BCOLORS)};
+const POOL=${JSON.stringify(POOL)};
+const HS=${JSON.stringify(hours)};
+const tX=t=>{const[h,m]=(t||'0:0').split(':').map(Number);return Math.max(0,((h*60+m)-TS)/(TE-TS)*TW);};
+const dX=(s,e)=>{const[sh,sm]=s.split(':').map(Number);let[eh,em]=e.split(':').map(Number);let sd=sh*60+sm,ed=eh*60+em;if(ed<sd)ed+=1440;return Math.max((ed-sd)/(TE-TS)*TW,4);};
+const ini=n=>n.split(' ').slice(0,2).map(w=>w[0]||'').join('').toUpperCase();
+function build(rows){
+  const m=document.getElementById('main');
+  document.getElementById('cnt').textContent=rows.length+' сотрудников';
+  if(!rows.length){m.innerHTML='<div class="empty">Ничего не найдено</div>';return;}
+  m.innerHTML=rows.map((r,i)=>{
+    const col=POOL[i%POOL.length];
+    const[sh,se]=(r.shift||'').split('–');
+    const sx=sh?tX(sh.trim()):0,sw=sh&&se?dX(sh.trim(),se.trim()):0;
+    const ax='<div class="ax">'+HS.map(h=>'<span>'+(h<10?'0'+h:h)+':00</span>').join('')+'</div>';
+    const sb=sw?'<div class="sb" style="background:'+col+'30;left:'+sx+'px;width:'+sw+'px;"></div>':'';
+    const segs=(r.breaks||[]).map(b=>{
+      const bx=tX(b.start),bw=dX(b.start,b.end),bc=BC[b.type]||'#f59e0b';
+      const lbl=bw>30?(bw>80?b.start+'–'+b.end:b.start):'';
+      return '<div class="bs" style="left:'+bx+'px;width:'+Math.max(bw,6)+'px;background:'+bc+';" title="'+b.type+': '+b.start+'–'+b.end+'"><span class="bl">'+lbl+'</span></div>';
+    }).join('');
+    return '<div class="card" data-n="'+r.name.toLowerCase()+'" data-sv="'+(r.sv||'')+'" data-rg="'+(r.rg||'')+'">'+
+      '<div class="hdr"><div class="ava" style="background:'+col+'22;color:'+col+';">'+ini(r.name)+'</div>'+
+      '<div><div class="nm">'+r.name+'</div><div class="mt">СВ: '+(r.sv||'—')+(r.rg?' · '+r.rg:'')+'</div></div>'+
+      '<span class="sh">'+r.shift+'</span></div>'+
+      '<div class="tw"><div>'+ax+'<div class="tr">'+sb+segs+'</div></div></div></div>';
+  }).join('');
+}
+function applyF(){
+  const q=(document.getElementById('srch')||{value:''}).value.toLowerCase();
+  const sv=(document.getElementById('svF')||{value:''}).value;
+  const rg=(document.getElementById('rgF')||{value:''}).value;
+  build(DATA.filter(r=>(!q||r.name.toLowerCase().includes(q))&&(!sv||r.sv===sv)&&(!rg||r.rg===rg)));
+}
+function resetF(){
+  ['srch','svF','rgF'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  applyF();
+}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape')resetF();
+  if(e.key==='/'&&e.target.tagName!=='INPUT'){e.preventDefault();const s=document.getElementById('srch');if(s)s.focus();}
+});
+applyF();
+<\/script></body></html>`;
+  downloadHTML(html, `Перерывы_${dk}.html`);
+}
+
+function exportScheduleHTML() {
+  if (!S.data.length) { toast('Нет данных расписания', 'warning'); return; }
+  const dk = dateKey(S.date);
+  const dateStr = formatDisp(S.date);
+  const y = S.date.getFullYear(), m = S.date.getMonth();
+  const dim = new Date(y,m+1,0).getDate();
+  const days = Array.from({length:dim}, (_,i) => {
+    const d = new Date(y,m,i+1);
+    return { d:i+1, dow:DAYS_RU[d.getDay()], dk:dateKey(d) };
+  });
+
+  const SLAB = { work:'Работает','21':'Ночная','9':'Изм.',ОТ:'Отпуск',БЛ:'Больн.',УО:'Уч.отп.',ОЗ:'Отп.б/с',НЯ:'Неявка',off:'' };
+  const SCOL = { work:'#3b82f6','21':'#8b5cf6','9':'#10b981',ОТ:'#64748b',БЛ:'#ef4444',УО:'#06b6d4',ОЗ:'#f97316',НЯ:'#dc2626',off:'' };
+
+  const empData = S.data.map(e => ({
+    name:e.name, rg:e.rg||'', sv:e.sv||'', graph:e.graphSurv||'',
+    days:days.map(day => { const sc=e.schedule[day.dk]||{status:'off'}; return {st:sc.status||'off',s:sc.shiftStart||'',e:sc.shiftEnd||''}; }),
+  }));
+
+  const rgs = [...new Set(empData.map(e=>e.rg).filter(Boolean))].sort();
+  const svs = [...new Set(empData.map(e=>e.sv).filter(Boolean))].sort();
+  const daysHdr = days.map(d=>`<th style="min-width:38px;padding:3px;text-align:center;font-size:.6rem;border-left:1px solid #e2e8f0;${d.dk===dk?'background:#dbeafe;':''}">${d.d}<br><span style="font-weight:400;opacity:.7;">${d.dow}</span></th>`).join('');
+
+  const dataJSON = JSON.stringify(empData);
+
+  const css = `*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0f4f8;color:#0f172a;font-size:13px;}
+header{background:#1e293b;color:#f1f5f9;padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.logo{font-weight:800;font-size:.95rem;letter-spacing:.04em;}
+h1{font-size:.9rem;font-weight:700;flex:1;}
+.dt{font-size:.78rem;color:#94a3b8;}
+.bar{padding:9px 20px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:10;}
+.bar input,.bar select{padding:4px 10px;border:1px solid #e2e8f0;border-radius:20px;font-size:.8rem;outline:none;background:#f8fafc;color:#0f172a;}
+.bar input:focus,.bar select:focus{border-color:#2563eb;}
+.rst{padding:3px 9px;border:1px solid #e2e8f0;border-radius:20px;font-size:.76rem;cursor:pointer;background:none;color:#64748b;}
+.rst:hover{border-color:#2563eb;color:#2563eb;}
+.cnt{font-size:.76rem;color:#64748b;margin-left:auto;}
+.tw{overflow-x:auto;padding:14px 20px;}
+table{border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08);}
+thead{position:sticky;top:46px;z-index:5;}
+th{padding:7px 8px;text-align:left;font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;background:#f8fafc;border-bottom:2px solid #e2e8f0;white-space:nowrap;}
+td{padding:6px 8px;border-bottom:1px solid #f0f4f8;font-size:.8rem;vertical-align:middle;}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:#f8fafc;}
+.ch{display:inline-flex;align-items:center;justify-content:center;padding:1px 4px;border-radius:10px;font-size:.59rem;font-weight:700;white-space:nowrap;line-height:1.3;}
+.td-today{background:#dbeafe1a;}
+@media print{.bar,header{position:static!important;}.tw{padding:0;}table{box-shadow:none;}}`;
+
+  const html = `<!DOCTYPE html>
+<html lang="ru"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>График работы — ${MONTHS_NOM[m]} ${y}</title><style>${css}</style></head>
+<body>
+<header><span class="logo">KAORZIP</span><h1>График работы — ${MONTHS_NOM[m]} ${y}</h1><span class="dt">Экспорт: ${dateStr}</span></header>
+<div class="bar">
+  <input type="text" id="srch" placeholder="Найти сотрудника…" oninput="applyF()"/>
+  ${rgs.length?`<select id="rgF" onchange="applyF()"><option value="">Все РГ</option>${rgs.map(r=>`<option>${r}</option>`).join('')}</select>`:''}
+  ${svs.length?`<select id="svF" onchange="applyF()"><option value="">Все СВ</option>${svs.map(s=>`<option>${s}</option>`).join('')}</select>`:''}
+  <button class="rst" onclick="resetF()">✕ Сбросить</button>
+  <span class="cnt" id="cnt"></span>
+</div>
+<div class="tw"><table id="tbl">
+  <thead><tr>
+    <th style="min-width:180px;">ФИО</th>
+    <th style="min-width:70px;">РГ</th>
+    <th style="min-width:90px;">СВ</th>
+    ${daysHdr}
+  </tr></thead>
+  <tbody id="tbody"></tbody>
+</table></div>
+<script>
+const DATA=${dataJSON};
+const TDAY='${dk}';
+const LBL=${JSON.stringify(SLAB)};
+const COL=${JSON.stringify(SCOL)};
+const DAYS=${JSON.stringify(days)};
+function build(rows){
+  document.getElementById('cnt').textContent=rows.length+' сотрудников';
+  const tidx=DAYS.findIndex(d=>d.dk===TDAY);
+  document.getElementById('tbody').innerHTML=rows.map(e=>{
+    const cells=e.days.map((d,i)=>{
+      const lbl=LBL[d.st]||'';const col=COL[d.st]||'transparent';
+      const tip=lbl&&d.s?d.s+'–'+d.e:'';
+      return '<td class="'+(i===tidx?'td-today':'')+'" title="'+tip+'">'+(lbl?'<span class="ch" style="background:'+col+'22;color:'+col+';">'+lbl+'</span>':'')+'</td>';
+    }).join('');
+    return '<tr><td><b>'+e.name+'</b></td><td>'+e.rg+'</td><td>'+e.sv+'</td>'+cells+'</tr>';
+  }).join('');
+}
+function applyF(){
+  const q=(document.getElementById('srch')||{value:''}).value.toLowerCase();
+  const rg=(document.getElementById('rgF')||{value:''}).value;
+  const sv=(document.getElementById('svF')||{value:''}).value;
+  build(DATA.filter(e=>(!q||e.name.toLowerCase().includes(q))&&(!rg||e.rg===rg)&&(!sv||e.sv===sv)));
+}
+function resetF(){['srch','rgF','svF'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});applyF();}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape')resetF();
+  if(e.key==='/'&&e.target.tagName!=='INPUT'){e.preventDefault();const s=document.getElementById('srch');if(s)s.focus();}
+});
+applyF();
+<\/script></body></html>`;
+  downloadHTML(html, `График_${y}-${pad(m+1)}.html`);
+}
+
 // ═══════════════════ EXPORT PAGE ═════════════════
 
 function renderExport() {
@@ -1884,38 +2188,31 @@ function renderExport() {
     <div class="export-grid">
 
       <div class="export-card">
+        <div class="export-icon">☕</div>
+        <div class="export-title">График перерывов HTML</div>
+        <div class="export-desc">Страница для сотрудников — кто, когда, перерыв / обед / ужин.<br>Поиск по имени, фильтры по СВ и РГ. Работает без интернета.</div>
+        <button class="btn btn-primary w-full" onclick="exportBreaksHTML()">Скачать HTML</button>
+      </div>
+
+      <div class="export-card">
+        <div class="export-icon">📅</div>
+        <div class="export-title">График работы HTML</div>
+        <div class="export-desc">Таблица месячного расписания для сотрудников.<br>Поиск по имени, фильтры по РГ и СВ. Работает без интернета.</div>
+        <button class="btn btn-primary w-full" onclick="exportScheduleHTML()">Скачать HTML</button>
+      </div>
+
+      <div class="export-card">
         <div class="export-icon">📊</div>
         <div class="export-title">Расписание .xlsx</div>
-        <div class="export-desc">Экспорт в исходном формате файла 1<br>(5 ячеек на день, все листы по месяцам)</div>
-        <button class="btn btn-primary w-full" onclick="exportScheduleExcel()">Скачать расписание</button>
+        <div class="export-desc">Экспорт в исходном формате<br>(5 ячеек на день, все листы по месяцам)</div>
+        <button class="btn btn-outline w-full" onclick="exportScheduleExcel()">Скачать .xlsx</button>
       </div>
 
       <div class="export-card">
         <div class="export-icon">☕</div>
         <div class="export-title">Перерывы .xlsx</div>
-        <div class="export-desc">Экспорт в исходном формате файла 2<br>(10-минутные слоты: перерыв/обед/ужин)</div>
-        <button class="btn btn-primary w-full" onclick="exportBreaksExcel()">Скачать перерывы</button>
-      </div>
-
-      <div class="export-card">
-        <div class="export-icon">🖼️</div>
-        <div class="export-title">Timeline → PNG</div>
-        <div class="export-desc">Снимок шкалы смен текущего дня<br>в высоком качестве</div>
-        <button class="btn btn-outline w-full" onclick="navigate('timeline');setTimeout(()=>captureAndSave('tlWrap','Timeline_'+dateKey(S.date)+'.png'),400)">${window.H2C_AVAILABLE?'Сохранить PNG':'⚠️ html2canvas не загружен'}</button>
-      </div>
-
-      <div class="export-card">
-        <div class="export-icon">☕</div>
-        <div class="export-title">Перерывы → PNG</div>
-        <div class="export-desc">Снимок графика перерывов<br>в высоком качестве</div>
-        <button class="btn btn-outline w-full" onclick="navigate('breaks');setTimeout(()=>captureAndSave('breaksCard','Перерывы_'+dateKey(S.date)+'.png'),400)">${window.H2C_AVAILABLE?'Сохранить PNG':'⚠️ html2canvas не загружен'}</button>
-      </div>
-
-      <div class="export-card">
-        <div class="export-icon">📄</div>
-        <div class="export-title">PDF отчёт</div>
-        <div class="export-desc">Timeline в PDF (альбомная ориентация)</div>
-        <button class="btn btn-outline w-full" onclick="navigate('timeline');setTimeout(()=>captureAndPDF('tlWrap','KAORZIP_'+dateKey(S.date)+'.pdf'),400)">${window.JSPDF_AVAILABLE?'Скачать PDF':'⚠️ jsPDF не загружен'}</button>
+        <div class="export-desc">Экспорт в исходном формате<br>(10-минутные слоты: перерыв/обед/ужин)</div>
+        <button class="btn btn-outline w-full" onclick="exportBreaksExcel()">Скачать .xlsx</button>
       </div>
 
       <div class="export-card">
@@ -2072,6 +2369,71 @@ function getReturningSoon() {
   return result;
 }
 
+// ═══════════════════ KEYBOARD ════════════════════
+
+function initKeyboard() {
+  document.addEventListener('keydown', ev => {
+    const tag = ev.target.tagName;
+    const inInput = tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'||ev.target.isContentEditable;
+
+    if (ev.key === 'Escape') {
+      ev.preventDefault();
+      if (!el('modalBackdrop').classList.contains('hidden')) { closeModal(); return; }
+      const drop = el('searchDropdown');
+      if (drop && drop.classList.contains('open')) { drop.classList.remove('open'); el('globalSearch').value=''; return; }
+      if (!el('legendPanel').classList.contains('hidden')) { el('legendPanel').classList.add('hidden'); return; }
+      return;
+    }
+
+    if (ev.key === 'Enter' && !inInput) {
+      if (!el('modalBackdrop').classList.contains('hidden')) {
+        const btn = el('modalBody').querySelector('.btn-primary');
+        if (btn) { btn.click(); return; }
+      }
+    }
+
+    if (inInput || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+
+    if (ev.key === '/') {
+      ev.preventDefault();
+      const s = el('globalSearch'); if (s) { s.focus(); s.select(); }
+      return;
+    }
+
+    if (ev.key === 'ArrowLeft') {
+      ev.preventDefault();
+      S.date = addDays(S.date, -1); updateDateDisplay();
+      if (S.page !== 'calendar') navigate(S.page);
+    } else if (ev.key === 'ArrowRight') {
+      ev.preventDefault();
+      S.date = addDays(S.date, +1); updateDateDisplay();
+      if (S.page !== 'calendar') navigate(S.page);
+    } else if (ev.key === 't' || ev.key === 'T') {
+      S.date = new Date(); updateDateDisplay();
+      if (S.page !== 'calendar') navigate(S.page);
+    }
+  });
+}
+
+// ═══════════════════ FILTER RESET ════════════════
+
+window.resetFilters = function(page) {
+  const maps = {
+    dashboard: ['dashDeptFilter'],
+    timeline:  ['tlRGFilter','tlSVFilter','tlShiftFilter'],
+    breaks:    ['brkRGFilter','brkSVFilter'],
+    employees: ['empRGFilter','empSVFilter','empShiftFilter','empStatusFilter','empSearch'],
+    calendar:  ['calEmpFilter','calRGFilter'],
+  };
+  (maps[page]||[]).forEach(id => {
+    const n = el(id); if (!n) return;
+    n.value = n.tagName==='INPUT' ? '' : (n.options[0]?.value||'');
+  });
+  S.tlScrollLeft = 0;
+  const renders = { dashboard:renderDashboard, timeline:renderTimeline, breaks:renderBreaksPage, calendar:renderCalendar, employees:applyEmpFilters };
+  if (renders[page]) renders[page]();
+};
+
 // ═══════════════════ LEGEND ══════════════════════
 
 function initLegend() {
@@ -2106,16 +2468,15 @@ function init() {
   initDateNav();
   initSearch();
   initLegend();
+  initKeyboard();
 
   el('themeBtn')      && el('themeBtn').addEventListener('click', toggleTheme);
   el('fullscreenBtn') && el('fullscreenBtn').addEventListener('click', toggleFullscreen);
   el('modalClose')    && el('modalClose').addEventListener('click', closeModal);
   el('modalBackdrop') && el('modalBackdrop').addEventListener('click', ev => { if(ev.target===el('modalBackdrop')) closeModal(); });
 
-  // Timeline action buttons
-  el('scrollNowBtn')    && el('scrollNowBtn').addEventListener('click', () => { const s=el('tlScroll'); if(s){ const nx=nowX(); if(nx>=0) s.scrollLeft=Math.max(0,nx-200); } });
-  el('tlExportImgBtn')  && el('tlExportImgBtn').addEventListener('click', () => captureAndSave('tlWrap', `Timeline_${dateKey(S.date)}.png`));
-  el('brkExportImgBtn') && el('brkExportImgBtn').addEventListener('click', () => captureAndSave('breaksCard', `Перерывы_${dateKey(S.date)}.png`));
+  // Timeline action buttons (PNG buttons removed per UX request)
+  el('scrollNowBtn') && el('scrollNowBtn').addEventListener('click', () => { const s=el('tlScroll'); if(s){ const nx=nowX(); if(nx>=0) s.scrollLeft=Math.max(0,nx-200); } });
 
   // Employee filters
   ['empSearch','empRGFilter','empSVFilter','empShiftFilter','empStatusFilter'].forEach(id => {
@@ -2159,11 +2520,11 @@ function init() {
   window.el          = el;
   window.dateKey     = dateKey;
   window.calNav      = calNav;
-  window.captureAndSave  = captureAndSave;
-  window.captureAndPDF   = captureAndPDF;
-  window.exportJSON      = exportJSON;
+  window.exportJSON          = exportJSON;
   window.exportScheduleExcel = exportScheduleExcel;
   window.exportBreaksExcel   = exportBreaksExcel;
+  window.exportBreaksHTML    = exportBreaksHTML;
+  window.exportScheduleHTML  = exportScheduleHTML;
   window.exportTextReport    = exportTextReport;
 
   console.info(`KAORZIP ready — Schedule: ${S.data.length} | Breaks: ${S.breaks.length}`);
