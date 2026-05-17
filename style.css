@@ -610,9 +610,16 @@ input, select, textarea { font: inherit; }
 }
 .tl-block:hover { opacity: .88; transform: scaleY(1.05); z-index: 3; }
 .tl-b-work    { background: var(--c-work); color: #fff; }
-.tl-b-night   { background: var(--c-night); color: #fff; }
+.tl-b-night   { background: var(--c-night); color: #fff; border-radius: 4px 0 0 4px; }
+.tl-b-night-cont { background: var(--c-night); color: #fff; opacity: .6; border-radius: 0 4px 4px 0; }
 .tl-b-changed { background: var(--c-chng); color: #fff; }
 .tl-b-break   { height: 18px; top: 15px; z-index: 3; color: #fff; }
+
+/* Jump-to search highlight */
+.tl-emp-highlight  { background: #fef3c7 !important; outline: 2px solid #f59e0b; outline-offset: -2px; border-radius: 4px; }
+[data-theme="dark"] .tl-emp-highlight { background: #451a03 !important; outline-color: #f59e0b; }
+.brk-emp-highlight { background: #fef3c7 !important; outline: 2px solid #f59e0b; outline-offset: -1px; border-radius: 4px; }
+[data-theme="dark"] .brk-emp-highlight { background: #451a03 !important; outline-color: #f59e0b; }
 
 .tl-now-line {
   position: absolute; top: 0; bottom: 0;

@@ -21,7 +21,7 @@ const STATUS_COLOR = {
 
 const BREAK_COLORS = {
   'перерыв': '#f59e0b',
-  'обед':    '#f97316',
+  'обед':    '#22c55e',
   'ужин':    '#8b5cf6',
 };
 
@@ -35,7 +35,7 @@ const LEGEND_ITEMS = [
   { label:'Отпуск б/с',     color:'#f97316' },
   { label:'Неявка',         color:'#dc2626' },
   { label:'Перерыв',        color:'#f59e0b' },
-  { label:'Обед',           color:'#f97316' },
+  { label:'Обед',           color:'#22c55e' },
   { label:'Ужин',           color:'#8b5cf6' },
 ];
 
@@ -216,8 +216,9 @@ function parseDayBlock(cells) {
   }
 
   const endN   = parseInt(c2);
-  const lunchN = parseInt(c3);
   const marker = parseInt(c5);
+  // c3 is a formula col (worked hours, not actual lunch time) — don't use as lunchHour;
+  // real break times come exclusively from the breaks file.
 
   // Night shift: start at 21
   if (startN === 21) {
@@ -225,7 +226,7 @@ function parseDayBlock(cells) {
       status: '21',
       shiftStart: '21:00',
       shiftEnd:   `${pad(endN)}:00`,
-      lunchHour:  isNaN(lunchN) ? null : lunchN,
+      lunchHour:  null,
       raw,
     };
   }
@@ -237,7 +238,7 @@ function parseDayBlock(cells) {
     status,
     shiftStart: `${pad(startN)}:00`,
     shiftEnd:   `${pad(endN)}:00`,
-    lunchHour:  isNaN(lunchN) ? null : lunchN,
+    lunchHour:  null,
     raw,
   };
 }
@@ -1057,21 +1058,19 @@ function renderTimeline() {
       const w = tDurPx(sc.shiftStart||'09:00', sc.shiftEnd||'18:00');
       const cls = isNight ? 'tl-b-night' : (sc.status==='9'?'tl-b-changed':'tl-b-work');
       const label = w > 80 ? `${sc.shiftStart}–${sc.shiftEnd}` : '';
-      html += `<div class="tl-block ${cls}" style="left:${x}px;width:${w}px;" data-tip="${STATUS_LABEL[sc.status]}|${sc.shiftStart}–${sc.shiftEnd}">${label}</div>`;
-
-      // Breaks from file 2 if available, else lunch from schedule
-      // Per UX request: no time text on timeline break blocks — keep them visual only
-      if (brk && brk.breaks && brk.breaks.length) {
-        brk.breaks.forEach(b => {
-          const bx = tStrToX(b.start);
-          const bw = tDurPx(b.start, b.end);
-          if (bx < 0) return;
-          const col = BREAK_COLORS[b.type]||'#f59e0b';
-          html += `<div class="tl-block tl-b-break" style="left:${bx}px;width:${Math.max(bw,6)}px;background:${col};" data-tip="${b.type}|${b.start}–${b.end}"></div>`;
-        });
-      } else if (sc.lunchHour) {
-        const lx = tStrToX(`${pad(sc.lunchHour)}:00`);
-        html += `<div class="tl-block tl-b-break" style="left:${lx}px;width:${60*TL_PX_MIN}px;background:#f97316;" data-tip="Обед|${pad(sc.lunchHour)}:00–${pad(sc.lunchHour+1)}:00"></div>`;
+      if (isNight) {
+        // Night shift wraps midnight — draw two segments within the visible 08–22 window
+        const visEndPx = (TL_END - TL_START) * TL_PX_MIN;  // right edge of timeline
+        const segW = Math.max(visEndPx - x, 4);
+        html += `<div class="tl-block ${cls}" style="left:${x}px;width:${segW}px;" data-tip="${STATUS_LABEL[sc.status]}|${sc.shiftStart}–${sc.shiftEnd}">→</div>`;
+        // Also draw the morning continuation from 08:00 to shiftEnd
+        const endMin = timeToMin(sc.shiftEnd||'09:00');
+        if (endMin >= TL_START) {
+          const morW = tStrToX(sc.shiftEnd||'09:00');
+          html += `<div class="tl-block ${cls} tl-b-night-cont" style="left:0;width:${Math.max(morW,4)}px;" data-tip="→ до ${sc.shiftEnd}">←</div>`;
+        }
+      } else {
+        html += `<div class="tl-block ${cls}" style="left:${x}px;width:${w}px;" data-tip="${STATUS_LABEL[sc.status]}|${sc.shiftStart}–${sc.shiftEnd}">${label}</div>`;
       }
     } else if (isLeave) {
       const TL_W = (TL_END-TL_START)*TL_PX_MIN;
@@ -1123,8 +1122,6 @@ function renderTimeline() {
       </div>
     </div>
   `).join('');
-
-  const nowLineHeader = isToday_&&nx>=0 ? `<div class="tl-now-line tl-now-header" style="left:${nx+200}px;"><div class="tl-now-dot"></div><div class="tl-now-lbl">${minToTime(new Date().getHours()*60+new Date().getMinutes())}</div></div>` : '';
 
   setHTML('timelineContent', `
     <div class="tl-wrap" id="tlWrap">
@@ -1222,9 +1219,9 @@ function renderBreaksPage() {
     });
   }
 
-  // ── LIVE: who is on break now
-  const onBreak = getCurrentlyOnBreak();
-  const returningSoon = getReturningSoon();
+  // ── LIVE: who is on break now (respect SV filter)
+  const onBreak = getCurrentlyOnBreak(svF);
+  const returningSoon = getReturningSoon(svF);
   const isLive = isToday(S.date);
 
   const onBreakWidget = isLive ? `
@@ -1283,10 +1280,10 @@ function renderBreaksPage() {
       const bw = tDurPx(br.start, br.end);
       const bc = BREAK_COLORS[br.type]||'#f59e0b';
       const safe = b.name.replace(/'/g,"\\'");
-      // Always show time inside the block; widen to fit text comfortably.
-      const lbl = bw > 110 ? `${br.start}–${br.end}` : br.start;
-      const minW = bw > 110 ? 110 : 44;  // 44px fits "HH:MM" with padding
-      return `<div class="brk-seg" style="left:${bx}px;width:${Math.max(bw,minW)}px;background:${bc};" title="${br.type}: ${br.start}–${br.end} · кликни для редактирования" onclick="showBreakEdit('${safe}','${br.start}','${br.end}','${br.type}')"><span class="brk-seg-lbl">${lbl}</span></div>`;
+      // Show time label; block stays at natural width (no forced minW) to avoid overlapping.
+      // overflow:visible on .brk-seg lets the label extend outside the colored area when needed.
+      const lbl = bw > 110 ? `${br.start}–${br.end}` : `${br.start}`;
+      return `<div class="brk-seg" style="left:${bx}px;width:${Math.max(bw,6)}px;background:${bc};" title="${br.type}: ${br.start}–${br.end} · кликни для редактирования" onclick="showBreakEdit('${safe}','${br.start}','${br.end}','${br.type}')"><span class="brk-seg-lbl">${lbl}</span></div>`;
     }).join('');
 
     const safeNav = (emp?.name||b.name).replace(/'/g,"\\'");
@@ -2004,7 +2001,7 @@ function exportBreaksHTML() {
 
   const svs = [...new Set(rows.map(r=>r.sv).filter(Boolean))].sort();
   const rgs = [...new Set(rows.map(r=>r.rg).filter(Boolean))].sort();
-  const BCOLORS = {'перерыв':'#f59e0b','обед':'#f97316','ужин':'#8b5cf6'};
+  const BCOLORS = {'перерыв':'#f59e0b','обед':'#22c55e','ужин':'#8b5cf6'};
   const POOL = ['#6366f1','#8b5cf6','#ec4899','#f43f5e','#f97316','#eab308','#22c55e','#14b8a6','#06b6d4','#3b82f6'];
 
   const svOpts = svs.map(s=>`<option>${s}</option>`).join('');
@@ -2047,6 +2044,15 @@ main{padding:14px 22px;}
 .bl{font-size:.74rem;font-weight:700;color:#fff;white-space:nowrap;letter-spacing:.01em;}
 .empty{text-align:center;padding:50px;color:#94a3b8;}
 .hint{text-align:center;padding:6px;font-size:.72rem;color:#94a3b8;font-style:italic;}
+@media(max-width:600px){
+  header{padding:10px 14px;gap:8px;}
+  h1{font-size:.82rem;}
+  .bar{padding:8px 14px;gap:6px;}
+  .bar input,.bar select{padding:4px 8px;font-size:.78rem;}
+  main{padding:10px 14px;}
+  .nm{font-size:.82rem;}.mt{font-size:.7rem;}.sh{font-size:.74rem;}
+  .ax span{font-size:.55rem;}.bl{font-size:.65rem;}
+}
 @media print{.bar,header{position:static!important;}.tw::-webkit-scrollbar{display:none;}}`;
 
   const html = `<!DOCTYPE html>
@@ -2063,7 +2069,7 @@ main{padding:14px 22px;}
 </div>
 <div class="leg">
   <span><span class="ld" style="background:#f59e0b;"></span>Перерыв</span>
-  <span><span class="ld" style="background:#f97316;"></span>Обед</span>
+  <span><span class="ld" style="background:#22c55e;"></span>Обед</span>
   <span><span class="ld" style="background:#8b5cf6;"></span>Ужин</span>
 </div>
 <main id="main"></main>
@@ -2183,6 +2189,18 @@ tr:hover .col-name,tr:hover .col-rg,tr:hover .col-sv{background:#f8fafc;}
 .td-today{background:#eff6ff;}
 .scroll-hint{padding:8px 20px;background:linear-gradient(90deg,#dbeafe,#fff);font-size:.78rem;color:#1e40af;text-align:center;flex-shrink:0;border-bottom:1px solid #e2e8f0;}
 .scroll-hint b{font-weight:700;}
+@media(max-width:600px){
+  header{padding:10px 14px;gap:8px;}
+  h1{font-size:.82rem;}
+  .bar{padding:7px 14px;gap:5px;overflow-x:auto;}
+  .bar input,.bar select{padding:3px 8px;font-size:.75rem;flex-shrink:0;}
+  .scroll-hint{padding:5px 14px;font-size:.72rem;}
+  .tw{padding:8px 14px 10px;}
+  th,td{padding:5px 4px;font-size:.72rem;}
+  .col-name{min-width:140px;max-width:140px;}
+  .col-rg{left:140px;min-width:60px;max-width:60px;}
+  .col-sv{left:200px;min-width:80px;max-width:80px;}
+}
 @media print{.bar,header,.scroll-hint{position:static!important;}.tw{padding:0;overflow:visible;}table{box-shadow:none;}thead th{position:static;}.col-name,.col-rg,.col-sv{position:static;}}`;
 
   const html = `<!DOCTYPE html>
@@ -2393,13 +2411,14 @@ function toggleFullscreen() { if(!document.fullscreenElement) document.documentE
 
 // ═══════════════════ ON BREAK NOW ════════════════
 
-function getCurrentlyOnBreak() {
+function getCurrentlyOnBreak(svFilter='') {
   const now = new Date();
   const nowMin = now.getHours()*60 + now.getMinutes();
   if (!isToday(S.date)) return [];
 
   const result = [];
   S.breaks.forEach(b => {
+    if (svFilter && b.sv !== svFilter) return;
     (b.breaks||[]).forEach(br => {
       const s = timeToMin(br.start);
       const e = timeToMin(br.end);
@@ -2411,14 +2430,15 @@ function getCurrentlyOnBreak() {
   return result;
 }
 
-function getReturningSoon() {
-  // Who will return from break within next 10 minutes
+function getReturningSoon(svFilter='') {
+  // Who will start a break within the next 10 minutes
   const now = new Date();
   const nowMin = now.getHours()*60 + now.getMinutes();
   if (!isToday(S.date)) return [];
 
   const result = [];
   S.breaks.forEach(b => {
+    if (svFilter && b.sv !== svFilter) return;
     (b.breaks||[]).forEach(br => {
       const s = timeToMin(br.start);
       if (s > nowMin && s - nowMin <= 10) {
@@ -2480,8 +2500,8 @@ function initKeyboard() {
 window.resetFilters = function(page) {
   const maps = {
     dashboard: ['dashDeptFilter'],
-    timeline:  ['tlRGFilter','tlSVFilter','tlShiftFilter'],
-    breaks:    ['brkRGFilter','brkSVFilter'],
+    timeline:  ['tlEmpSearch','tlRGFilter','tlSVFilter','tlShiftFilter'],
+    breaks:    ['brkEmpSearch','brkRGFilter','brkSVFilter'],
     employees: ['empRGFilter','empSVFilter','empShiftFilter','empStatusFilter','empSearch'],
     calendar:  ['calEmpFilter','calRGFilter'],
   };
@@ -2535,8 +2555,33 @@ function init() {
   el('modalClose')    && el('modalClose').addEventListener('click', closeModal);
   el('modalBackdrop') && el('modalBackdrop').addEventListener('click', ev => { if(ev.target===el('modalBackdrop')) closeModal(); });
 
-  // Timeline action buttons (PNG buttons removed per UX request)
-  el('scrollNowBtn') && el('scrollNowBtn').addEventListener('click', () => { const s=el('tlScroll'); if(s){ const nx=nowX(); if(nx>=0) s.scrollLeft=Math.max(0,nx-200); } });
+  // Timeline jump-to-employee search
+  el('tlEmpSearch') && el('tlEmpSearch').addEventListener('input', () => {
+    const q = (el('tlEmpSearch').value||'').trim().toLowerCase();
+    qsa('.tl-row').forEach(row => {
+      const nameEl = row.querySelector('.tl-emp-name');
+      const name = (nameEl?.textContent||'').toLowerCase();
+      const match = q && name.includes(q);
+      row.classList.toggle('tl-emp-highlight', match);
+      if (match) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
+  });
+
+  // Breaks jump-to-employee search
+  el('brkEmpSearch') && el('brkEmpSearch').addEventListener('input', () => {
+    const q = (el('brkEmpSearch').value||'').trim().toLowerCase();
+    qsa('.brk-row').forEach(row => {
+      const nameEl = row.querySelector('.brk-emp-name');
+      const name = (nameEl?.textContent||'').toLowerCase();
+      const match = q && name.includes(q);
+      row.classList.toggle('brk-emp-highlight', match);
+      if (match) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
+  });
 
   // Employee filters
   ['empSearch','empRGFilter','empSVFilter','empShiftFilter','empStatusFilter'].forEach(id => {
