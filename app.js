@@ -1281,10 +1281,11 @@ function renderBreaksPage() {
       const bw = tDurPx(br.start, br.end);
       const bc = BREAK_COLORS[br.type]||'#f59e0b';
       const safe = b.name.replace(/'/g,"\\'");
-      // Show time label; block stays at natural width (no forced minW) to avoid overlapping.
-      // overflow:visible on .brk-seg lets the label extend outside the colored area when needed.
-      const lbl = bw > 110 ? `${br.start}–${br.end}` : `${br.start}`;
-      return `<div class="brk-seg" style="left:${bx}px;width:${Math.max(bw,6)}px;background:${bc};" title="${br.type}: ${br.start}–${br.end} · кликни для редактирования" onclick="showBreakEdit('${safe}','${br.start}','${br.end}','${br.type}')"><span class="brk-seg-lbl">${lbl}</span></div>`;
+      // Block anchored at start time, min width 58px so "10:00" always fits inside.
+      // White halo (box-shadow in CSS) gives visible separation between adjacent blocks.
+      const lbl = bw > 95 ? `${br.start}–${br.end}` : `${br.start}`;
+      const finalW = Math.max(bw, 58);
+      return `<div class="brk-seg" style="left:${bx}px;width:${finalW}px;background:${bc};" title="${br.type}: ${br.start}–${br.end} · кликни для редактирования" onclick="showBreakEdit('${safe}','${br.start}','${br.end}','${br.type}')"><span class="brk-seg-lbl">${lbl}</span></div>`;
     }).join('');
 
     const safeNav = (emp?.name||b.name).replace(/'/g,"\\'");
@@ -2027,10 +2028,11 @@ function exportBreaksHTML() {
     const segs = (r.breaks || []).map(b => {
       const bx = tX(b.start), bw = dX(b.start, b.end);
       const bc = BCOLORS[b.type] || '#f59e0b';
-      // Left edge anchored at start time; min-width 58px so "10:00" fits inside
+      // Left edge at start time; min width 58px so "10:00" fits inside.
+      // Box-shadow halo creates visible 2px white gap so adjacent blocks don't merge visually.
       const finalW = Math.max(bw, 58);
       const lbl = bw > 95 ? `${b.start}–${b.end}` : b.start;
-      return `<div style="position:absolute;top:50%;transform:translateY(-50%);height:28px;border-radius:5px;background:${bc};overflow:hidden;left:${bx.toFixed(1)}px;width:${finalW.toFixed(1)}px;display:flex;align-items:center;justify-content:center;padding:0 4px;box-shadow:0 1px 3px rgba(0,0,0,.2);" title="${esc(b.type)}: ${b.start}–${b.end}"><span style="font-size:.7rem;font-weight:700;color:#fff;white-space:nowrap;">${lbl}</span></div>`;
+      return `<div style="position:absolute;top:50%;transform:translateY(-50%);height:28px;border-radius:5px;background:${bc};overflow:hidden;left:${bx.toFixed(1)}px;width:${finalW.toFixed(1)}px;display:flex;align-items:center;justify-content:center;padding:0 4px;box-shadow:0 0 0 2px #fff,0 1px 3px rgba(0,0,0,.22);" title="${esc(b.type)}: ${b.start}–${b.end}"><span style="font-size:.7rem;font-weight:700;color:#fff;white-space:nowrap;">${lbl}</span></div>`;
     }).join('');
     return `<div class="card" data-n="${esc(r.name.toLowerCase())}" data-sv="${esc(r.sv||'')}" data-rg="${esc(r.rg||'')}">
 <div class="hdr"><div class="ava" style="background:${col}22;color:${col};">${ini(r.name)}</div>
@@ -2572,42 +2574,25 @@ function init() {
   el('modalClose')    && el('modalClose').addEventListener('click', closeModal);
   el('modalBackdrop') && el('modalBackdrop').addEventListener('click', ev => { if(ev.target===el('modalBackdrop')) closeModal(); });
 
-  // Timeline: jump to employee on Enter or 🔍 button (not on every keystroke)
+  // Timeline: filter rows as user types (no scroll, no highlight)
   function doTlSearch() {
     const q = (el('tlEmpSearch')?.value||'').trim().toLowerCase();
-    let found = false;
     qsa('.tl-row').forEach(row => {
       const name = (row.querySelector('.tl-emp-name')?.textContent||'').toLowerCase();
-      const match = q && name.includes(q);
-      row.classList.toggle('tl-emp-highlight', match);
-      if (match && !found) { row.scrollIntoView({ behavior:'smooth', block:'center' }); found = true; }
+      row.style.display = (!q || name.includes(q)) ? '' : 'none';
     });
-    if (q && !found) toast('Сотрудник не найден', 'warning');
   }
-  el('tlEmpSearch')    && el('tlEmpSearch').addEventListener('keydown', e => { if (e.key==='Enter') doTlSearch(); });
-  el('tlEmpSearchBtn') && el('tlEmpSearchBtn').addEventListener('click', doTlSearch);
-  // Clear highlights when input is cleared
-  el('tlEmpSearch')    && el('tlEmpSearch').addEventListener('input', () => {
-    if (!(el('tlEmpSearch')?.value||'').trim()) qsa('.tl-row').forEach(r => r.classList.remove('tl-emp-highlight'));
-  });
+  el('tlEmpSearch') && el('tlEmpSearch').addEventListener('input', doTlSearch);
 
-  // Breaks: jump to employee on Enter or 🔍 button
+  // Breaks: filter rows as user types (no scroll, no highlight)
   function doBrkSearch() {
     const q = (el('brkEmpSearch')?.value||'').trim().toLowerCase();
-    let found = false;
     qsa('.brk-row').forEach(row => {
       const name = (row.querySelector('.brk-emp-name')?.textContent||'').toLowerCase();
-      const match = q && name.includes(q);
-      row.classList.toggle('brk-emp-highlight', match);
-      if (match && !found) { row.scrollIntoView({ behavior:'smooth', block:'center' }); found = true; }
+      row.style.display = (!q || name.includes(q)) ? '' : 'none';
     });
-    if (q && !found) toast('Сотрудник не найден', 'warning');
   }
-  el('brkEmpSearch')    && el('brkEmpSearch').addEventListener('keydown', e => { if (e.key==='Enter') doBrkSearch(); });
-  el('brkEmpSearchBtn') && el('brkEmpSearchBtn').addEventListener('click', doBrkSearch);
-  el('brkEmpSearch')    && el('brkEmpSearch').addEventListener('input', () => {
-    if (!(el('brkEmpSearch')?.value||'').trim()) qsa('.brk-row').forEach(r => r.classList.remove('brk-emp-highlight'));
-  });
+  el('brkEmpSearch') && el('brkEmpSearch').addEventListener('input', doBrkSearch);
 
   // Employee filters
   ['empSearch','empRGFilter','empSVFilter','empShiftFilter','empStatusFilter'].forEach(id => {
