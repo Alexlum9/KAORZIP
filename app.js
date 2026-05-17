@@ -1041,7 +1041,8 @@ function renderTimeline() {
   const isToday_ = sameDay(S.date, new Date());
   const nx = nowX();
 
-  const axisHTML = hours.map(h=>`<div class="tl-hour${isToday_&&h===new Date().getHours()?' tl-hour-now':''}">${pad(h)}:00</div>`).join('');
+  // Axis: absolute-positioned ticks at exact pixel positions matching block math
+  const axisHTML = hours.map(h=>`<div class="tl-hour${isToday_&&h===new Date().getHours()?' tl-hour-now':''}" style="left:${(h*60-TL_START)*TL_PX_MIN}px;">${pad(h)}:00</div>`).join('');
 
   const gridLines = hours.map(()=>`<div class="tl-grid-line"></div>`).join('');
 
@@ -1129,7 +1130,7 @@ function renderTimeline() {
         <div style="min-width:${TL_W+200}px;position:relative;">
           <div class="tl-header">
             <div class="tl-name-hdr">Сотрудник</div>
-            <div class="tl-axis">${axisHTML}</div>
+            <div class="tl-axis" style="width:${TL_W}px;">${axisHTML}</div>
           </div>
           ${rowsHTML || emptyState('Нет работающих сотрудников за этот день', '', '📅')}
         </div>
@@ -1314,8 +1315,8 @@ function renderBreaksPage() {
       <div class="card-body brk-scroll-wrap">
         <div style="min-width:${TL_W+220}px;">
           <div style="display:flex;margin-bottom:6px;">
-            <div style="width:220px;min-width:220px;"></div>
-            <div style="position:relative;height:20px;flex:1;">${axisHTML}</div>
+            <div style="width:220px;min-width:220px;flex-shrink:0;"></div>
+            <div style="position:relative;height:20px;width:${TL_W}px;flex-shrink:0;">${axisHTML}</div>
           </div>
           ${rowsHTML || emptyState('Нет данных перерывов', 'Импортируйте файл перерывов', '☕')}
         </div>
@@ -1998,17 +1999,44 @@ function exportBreaksHTML() {
   const TW = 980, TS = 8*60, TE = 22*60;
   const tX = t => { const [h,m]=(t||'0:0').split(':').map(Number); return Math.max(0,((h*60+m)-TS)/(TE-TS)*TW); };
   const dX = (s,e_) => { const [sh,sm]=s.split(':').map(Number); let [eh,em]=e_.split(':').map(Number); let sd=sh*60+sm,ed=eh*60+em; if(ed<sd)ed+=1440; return Math.max((ed-sd)/(TE-TS)*TW,4); };
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const ini = n => n.split(' ').slice(0,2).map(w=>w[0]||'').join('').toUpperCase();
 
   const svs = [...new Set(rows.map(r=>r.sv).filter(Boolean))].sort();
   const rgs = [...new Set(rows.map(r=>r.rg).filter(Boolean))].sort();
   const BCOLORS = {'перерыв':'#f59e0b','обед':'#22c55e','ужин':'#8b5cf6'};
   const POOL = ['#6366f1','#8b5cf6','#ec4899','#f43f5e','#f97316','#eab308','#22c55e','#14b8a6','#06b6d4','#3b82f6'];
+  const hours = [8,9,10,11,12,13,14,15,16,17,18,19,20,21,22];
 
-  const svOpts = svs.map(s=>`<option>${s}</option>`).join('');
-  const rgOpts = rgs.map(s=>`<option>${s}</option>`).join('');
-  const hours  = [8,9,10,11,12,13,14,15,16,17,18,19,20,21,22];
+  const svOpts = svs.map(s=>`<option>${esc(s)}</option>`).join('');
+  const rgOpts = rgs.map(s=>`<option>${esc(s)}</option>`).join('');
 
-  const dataJSON = JSON.stringify(rows.map(r=>({name:r.name,sv:r.sv,rg:r.rg,shift:r.shift,breaks:(r.breaks||[]).map(b=>({type:b.type,start:b.start,end:b.end}))})));
+  // Pre-render axis with absolute-positioned labels (pixel-exact alignment)
+  const axisHTML = hours.map(h => {
+    const left = ((h*60 - TS) / (TE - TS) * TW).toFixed(1);
+    return `<span style="position:absolute;left:${left}px;font-size:.66rem;color:#94a3b8;font-weight:500;white-space:nowrap;">${h<10?'0'+h:h}:00</span>`;
+  }).join('');
+
+  // Pre-render all cards as static HTML — no JS needed to display content
+  const cardsHTML = rows.map((r, i) => {
+    const col = POOL[i % POOL.length];
+    const [sh, se] = (r.shift || '').split('–');
+    const sx = sh ? tX(sh.trim()) : 0;
+    const sw = sh && se ? dX(sh.trim(), se.trim()) : 0;
+    const sb = sw ? `<div style="position:absolute;top:50%;transform:translateY(-50%);height:6px;border-radius:3px;background:${col}30;left:${sx.toFixed(1)}px;width:${sw.toFixed(1)}px;"></div>` : '';
+    const segs = (r.breaks || []).map(b => {
+      const bx = tX(b.start), bw = dX(b.start, b.end);
+      const bc = BCOLORS[b.type] || '#f59e0b';
+      const lbl = bw > 110 ? `${b.start}–${b.end}` : b.start;
+      return `<div style="position:absolute;top:50%;transform:translateY(-50%);height:28px;border-radius:5px;overflow:hidden;background:${bc};left:${bx.toFixed(1)}px;width:${Math.max(bw,6).toFixed(1)}px;" title="${esc(b.type)}: ${b.start}–${b.end}"><span style="position:absolute;bottom:calc(100% + 3px);left:0;font-size:.7rem;font-weight:700;color:#0f172a;white-space:nowrap;background:rgba(255,255,255,.92);border-radius:3px;padding:0 3px;pointer-events:none;">${lbl}</span></div>`;
+    }).join('');
+    return `<div class="card" data-n="${esc(r.name.toLowerCase())}" data-sv="${esc(r.sv||'')}" data-rg="${esc(r.rg||'')}">
+<div class="hdr"><div class="ava" style="background:${col}22;color:${col};">${ini(r.name)}</div>
+<div><div class="nm">${esc(r.name)}</div><div class="mt">СВ: ${esc(r.sv||'—')}${r.rg?' · '+esc(r.rg):''}</div></div>
+<span class="sh">${esc(r.shift)}</span></div>
+<div class="tw"><div style="position:relative;height:20px;width:${TW}px;margin-bottom:8px;">${axisHTML}</div>
+<div style="position:relative;height:50px;width:${TW}px;overflow:visible;">${sb}${segs}</div></div></div>`;
+  }).join('\n');
 
   const css = `*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0f4f8;color:#0f172a;}
@@ -2031,19 +2059,12 @@ main{padding:14px 22px;}
 .nm{font-weight:700;font-size:.92rem;}
 .mt{font-size:.75rem;color:#64748b;}
 .sh{margin-left:auto;font-size:.82rem;color:#475569;font-weight:600;white-space:nowrap;}
-.tw{padding:10px 14px 14px;overflow-x:auto;}
+.tw{padding:10px 14px 18px;overflow-x:auto;}
 .tw::-webkit-scrollbar{height:12px;}
 .tw::-webkit-scrollbar-track{background:#f1f5f9;border-radius:6px;}
 .tw::-webkit-scrollbar-thumb{background:#94a3b8;border-radius:6px;border:2px solid #f1f5f9;}
 .tw::-webkit-scrollbar-thumb:hover{background:#64748b;}
-.ax{display:flex;width:${TW}px;margin-bottom:6px;}
-.ax span{flex:1;font-size:.68rem;color:#94a3b8;font-weight:500;}
-.tr{position:relative;height:36px;width:${TW}px;}
-.sb{position:absolute;top:50%;transform:translateY(-50%);height:6px;border-radius:3px;}
-.bs{position:absolute;top:50%;transform:translateY(-50%);height:28px;border-radius:5px;display:flex;align-items:center;justify-content:center;padding:0 6px;overflow:visible;}
-.bl{font-size:.74rem;font-weight:700;color:#fff;white-space:nowrap;letter-spacing:.01em;}
-.empty{text-align:center;padding:50px;color:#94a3b8;}
-.hint{text-align:center;padding:6px;font-size:.72rem;color:#94a3b8;font-style:italic;}
+.empty{text-align:center;padding:50px;color:#94a3b8;display:none;}
 @media(max-width:600px){
   header{padding:10px 14px;gap:8px;}
   h1{font-size:.82rem;}
@@ -2051,7 +2072,6 @@ main{padding:14px 22px;}
   .bar input,.bar select{padding:4px 8px;font-size:.78rem;}
   main{padding:10px 14px;}
   .nm{font-size:.82rem;}.mt{font-size:.7rem;}.sh{font-size:.74rem;}
-  .ax span{font-size:.55rem;}.bl{font-size:.65rem;}
 }
 @media print{.bar,header{position:static!important;}.tw::-webkit-scrollbar{display:none;}}`;
 
@@ -2061,66 +2081,44 @@ main{padding:14px 22px;}
 <body>
 <header><span class="logo">KAORZIP</span><h1>График перерывов — ${dateStr}</h1><span class="dt">📅 ${dateStr}</span></header>
 <div class="bar">
-  <input type="text" id="srch" placeholder="Найти сотрудника… (или нажми /)" oninput="applyF()"/>
+  <input type="text" id="srch" placeholder="Найти сотрудника…" oninput="applyF()"/>
   ${svs.length?`<select id="svF" onchange="applyF()"><option value="">Все СВ</option>${svOpts}</select>`:''}
   ${rgs.length?`<select id="rgF" onchange="applyF()"><option value="">Все РГ</option>${rgOpts}</select>`:''}
   <button class="rst" onclick="resetF()">✕ Сбросить</button>
-  <span class="cnt" id="cnt"></span>
+  <span class="cnt" id="cnt">${rows.length} сотрудников</span>
 </div>
 <div class="leg">
   <span><span class="ld" style="background:#f59e0b;"></span>Перерыв</span>
   <span><span class="ld" style="background:#22c55e;"></span>Обед</span>
   <span><span class="ld" style="background:#8b5cf6;"></span>Ужин</span>
 </div>
-<main id="main"></main>
+<main id="main">
+${cardsHTML}
+<div class="empty" id="emptyMsg">Ничего не найдено</div>
+</main>
 <script>
-const DATA=${dataJSON};
-const TW=${TW},TS=${TS},TE=${TE};
-const BC=${JSON.stringify(BCOLORS)};
-const POOL=${JSON.stringify(POOL)};
-const HS=${JSON.stringify(hours)};
-const tX=t=>{const[h,m]=(t||'0:0').split(':').map(Number);return Math.max(0,((h*60+m)-TS)/(TE-TS)*TW);};
-const dX=(s,e)=>{const[sh,sm]=s.split(':').map(Number);let[eh,em]=e.split(':').map(Number);let sd=sh*60+sm,ed=eh*60+em;if(ed<sd)ed+=1440;return Math.max((ed-sd)/(TE-TS)*TW,4);};
-const ini=n=>n.split(' ').slice(0,2).map(w=>w[0]||'').join('').toUpperCase();
-function build(rows){
-  const m=document.getElementById('main');
-  document.getElementById('cnt').textContent=rows.length+' сотрудников';
-  if(!rows.length){m.innerHTML='<div class="empty">Ничего не найдено</div>';return;}
-  m.innerHTML=rows.map((r,i)=>{
-    const col=POOL[i%POOL.length];
-    const[sh,se]=(r.shift||'').split('–');
-    const sx=sh?tX(sh.trim()):0,sw=sh&&se?dX(sh.trim(),se.trim()):0;
-    const ax='<div class="ax">'+HS.map(h=>'<span>'+(h<10?'0'+h:h)+':00</span>').join('')+'</div>';
-    const sb=sw?'<div class="sb" style="background:'+col+'30;left:'+sx+'px;width:'+sw+'px;"></div>':'';
-    const segs=(r.breaks||[]).map(b=>{
-      const bx=tX(b.start),bw=dX(b.start,b.end),bc=BC[b.type]||'#f59e0b';
-      // Always show time inside the block; widen so text fits.
-      const lbl=bw>110?(b.start+'–'+b.end):b.start;
-      const minW=bw>110?110:48;
-      return '<div class="bs" style="left:'+bx+'px;width:'+Math.max(bw,minW)+'px;background:'+bc+';" title="'+b.type+': '+b.start+'–'+b.end+'"><span class="bl">'+lbl+'</span></div>';
-    }).join('');
-    return '<div class="card" data-n="'+r.name.toLowerCase()+'" data-sv="'+(r.sv||'')+'" data-rg="'+(r.rg||'')+'">'+
-      '<div class="hdr"><div class="ava" style="background:'+col+'22;color:'+col+';">'+ini(r.name)+'</div>'+
-      '<div><div class="nm">'+r.name+'</div><div class="mt">СВ: '+(r.sv||'—')+(r.rg?' · '+r.rg:'')+'</div></div>'+
-      '<span class="sh">'+r.shift+'</span></div>'+
-      '<div class="tw"><div>'+ax+'<div class="tr">'+sb+segs+'</div></div></div></div>';
-  }).join('');
-}
 function applyF(){
-  const q=(document.getElementById('srch')||{value:''}).value.toLowerCase();
-  const sv=(document.getElementById('svF')||{value:''}).value;
-  const rg=(document.getElementById('rgF')||{value:''}).value;
-  build(DATA.filter(r=>(!q||r.name.toLowerCase().includes(q))&&(!sv||r.sv===sv)&&(!rg||r.rg===rg)));
+  var q=(document.getElementById('srch')||{value:''}).value.toLowerCase();
+  var sv=(document.getElementById('svF')||{value:''}).value;
+  var rg=(document.getElementById('rgF')||{value:''}).value;
+  var shown=0;
+  document.querySelectorAll('.card').forEach(function(c){
+    var ok=(!q||c.dataset.n.includes(q))&&(!sv||c.dataset.sv===sv)&&(!rg||c.dataset.rg===rg);
+    c.style.display=ok?'':'none';
+    if(ok)shown++;
+  });
+  document.getElementById('cnt').textContent=shown+' сотрудников';
+  var em=document.getElementById('emptyMsg');
+  if(em)em.style.display=shown?'none':'block';
 }
 function resetF(){
-  ['srch','svF','rgF'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  ['srch','svF','rgF'].forEach(function(id){var e=document.getElementById(id);if(e)e.value='';});
   applyF();
 }
-document.addEventListener('keydown',e=>{
+document.addEventListener('keydown',function(e){
   if(e.key==='Escape')resetF();
-  if(e.key==='/'&&e.target.tagName!=='INPUT'){e.preventDefault();const s=document.getElementById('srch');if(s)s.focus();}
+  if(e.key==='/'&&e.target.tagName!=='INPUT'){e.preventDefault();var s=document.getElementById('srch');if(s)s.focus();}
 });
-applyF();
 <\/script></body></html>`;
   downloadHTML(html, `Перерывы_${dk}.html`);
 }
@@ -2138,9 +2136,10 @@ function exportScheduleHTML() {
 
   const SLAB = { work:'Работает','21':'Ночная','9':'Изм.',ОТ:'Отпуск',БЛ:'Больн.',УО:'Уч.отп.',ОЗ:'Отп.б/с',НЯ:'Неявка',off:'' };
   const SCOL = { work:'#3b82f6','21':'#8b5cf6','9':'#10b981',ОТ:'#64748b',БЛ:'#ef4444',УО:'#06b6d4',ОЗ:'#f97316',НЯ:'#dc2626',off:'' };
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
   const empData = S.data.map(e => ({
-    name:e.name, rg:e.rg||'', sv:e.sv||'', graph:e.graphSurv||'',
+    name:e.name, rg:e.rg||'', sv:e.sv||'',
     days:days.map(day => { const sc=e.schedule[day.dk]||{status:'off'}; return {st:sc.status||'off',s:sc.shiftStart||'',e:sc.shiftEnd||''}; }),
   }));
 
@@ -2148,7 +2147,17 @@ function exportScheduleHTML() {
   const svs = [...new Set(empData.map(e=>e.sv).filter(Boolean))].sort();
   const daysHdr = days.map(d=>`<th class="th-day${d.dk===dk?' th-today':''}">${d.d}<br><span class="dow">${d.dow}</span></th>`).join('');
 
-  const dataJSON = JSON.stringify(empData);
+  // Pre-render all rows as static HTML — content visible even without JS
+  const tbodyHTML = empData.map(e => {
+    const cells = e.days.map((d, i) => {
+      const lbl = SLAB[d.st] || '';
+      const col = SCOL[d.st] || 'transparent';
+      const tip = lbl && d.s ? `${d.s}–${d.e}` : '';
+      const today = days[i].dk === dk;
+      return `<td${today?' class="td-today"':''}${tip?` title="${tip}"`:''}>${lbl?`<span class="ch" style="background:${col}22;color:${col};">${lbl}</span>`:''}</td>`;
+    }).join('');
+    return `<tr data-n="${esc(e.name.toLowerCase())}" data-rg="${esc(e.rg)}" data-sv="${esc(e.sv)}"><td class="col-name"><b>${esc(e.name)}</b></td><td class="col-rg">${esc(e.rg)}</td><td class="col-sv">${esc(e.sv)}</td>${cells}</tr>`;
+  }).join('\n');
 
   // Three left columns are sticky. left offsets must match their widths.
   const css = `*{box-sizing:border-box;margin:0;padding:0;}
@@ -2178,7 +2187,6 @@ th.th-today{background:#dbeafe;color:#1e40af;}
 td{padding:7px 8px;border-bottom:1px solid #f0f4f8;font-size:.8rem;vertical-align:middle;background:#fff;}
 tr:last-child td{border-bottom:none;}
 tr:hover td{background:#f8fafc;}
-/* Sticky left columns */
 .col-name,.col-rg,.col-sv{position:sticky;background:#fff;z-index:1;}
 thead .col-name,thead .col-rg,thead .col-sv{z-index:4;background:#f8fafc;}
 .col-name{left:0;min-width:200px;max-width:200px;}
@@ -2210,51 +2218,41 @@ tr:hover .col-name,tr:hover .col-rg,tr:hover .col-sv{background:#f8fafc;}
 <header><span class="logo">KAORZIP</span><h1>График работы — ${MONTHS_NOM[m]} ${y}</h1><span class="dt">Экспорт: ${dateStr}</span></header>
 <div class="bar">
   <input type="text" id="srch" placeholder="Найти сотрудника…" oninput="applyF()"/>
-  ${rgs.length?`<select id="rgF" onchange="applyF()"><option value="">Все РГ</option>${rgs.map(r=>`<option>${r}</option>`).join('')}</select>`:''}
-  ${svs.length?`<select id="svF" onchange="applyF()"><option value="">Все СВ</option>${svs.map(s=>`<option>${s}</option>`).join('')}</select>`:''}
+  ${rgs.length?`<select id="rgF" onchange="applyF()"><option value="">Все РГ</option>${rgs.map(r=>`<option>${esc(r)}</option>`).join('')}</select>`:''}
+  ${svs.length?`<select id="svF" onchange="applyF()"><option value="">Все СВ</option>${svs.map(s=>`<option>${esc(s)}</option>`).join('')}</select>`:''}
   <button class="rst" onclick="resetF()">✕ Сбросить</button>
-  <span class="cnt" id="cnt"></span>
+  <span class="cnt" id="cnt">${empData.length} сотрудников</span>
 </div>
 <div class="scroll-hint">← <b>Прокрути таблицу вправо</b>, чтобы увидеть остальные дни месяца. ФИО, РГ и СВ остаются на месте. →</div>
-<div class="tw"><table id="tbl">
+<div class="tw"><table>
   <thead><tr>
     <th class="col-name">ФИО</th>
     <th class="col-rg">РГ</th>
     <th class="col-sv">СВ</th>
     ${daysHdr}
   </tr></thead>
-  <tbody id="tbody"></tbody>
+  <tbody id="tbody">
+${tbodyHTML}
+  </tbody>
 </table></div>
 <script>
-const DATA=${dataJSON};
-const TDAY='${dk}';
-const LBL=${JSON.stringify(SLAB)};
-const COL=${JSON.stringify(SCOL)};
-const DAYS=${JSON.stringify(days)};
-function build(rows){
-  document.getElementById('cnt').textContent=rows.length+' сотрудников';
-  const tidx=DAYS.findIndex(d=>d.dk===TDAY);
-  document.getElementById('tbody').innerHTML=rows.map(e=>{
-    const cells=e.days.map((d,i)=>{
-      const lbl=LBL[d.st]||'';const col=COL[d.st]||'transparent';
-      const tip=lbl&&d.s?d.s+'–'+d.e:'';
-      return '<td class="'+(i===tidx?'td-today':'')+'" title="'+tip+'">'+(lbl?'<span class="ch" style="background:'+col+'22;color:'+col+';">'+lbl+'</span>':'')+'</td>';
-    }).join('');
-    return '<tr><td class="col-name"><b>'+e.name+'</b></td><td class="col-rg">'+e.rg+'</td><td class="col-sv">'+e.sv+'</td>'+cells+'</tr>';
-  }).join('');
-}
 function applyF(){
-  const q=(document.getElementById('srch')||{value:''}).value.toLowerCase();
-  const rg=(document.getElementById('rgF')||{value:''}).value;
-  const sv=(document.getElementById('svF')||{value:''}).value;
-  build(DATA.filter(e=>(!q||e.name.toLowerCase().includes(q))&&(!rg||e.rg===rg)&&(!sv||e.sv===sv)));
+  var q=(document.getElementById('srch')||{value:''}).value.toLowerCase();
+  var rg=(document.getElementById('rgF')||{value:''}).value;
+  var sv=(document.getElementById('svF')||{value:''}).value;
+  var shown=0;
+  document.querySelectorAll('#tbody tr').forEach(function(r){
+    var ok=(!q||r.dataset.n.includes(q))&&(!rg||r.dataset.rg===rg)&&(!sv||r.dataset.sv===sv);
+    r.style.display=ok?'':'none';
+    if(ok)shown++;
+  });
+  document.getElementById('cnt').textContent=shown+' сотрудников';
 }
-function resetF(){['srch','rgF','svF'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});applyF();}
-document.addEventListener('keydown',e=>{
+function resetF(){['srch','rgF','svF'].forEach(function(id){var e=document.getElementById(id);if(e)e.value='';});applyF();}
+document.addEventListener('keydown',function(e){
   if(e.key==='Escape')resetF();
-  if(e.key==='/'&&e.target.tagName!=='INPUT'){e.preventDefault();const s=document.getElementById('srch');if(s)s.focus();}
+  if(e.key==='/'&&e.target.tagName!=='INPUT'){e.preventDefault();var s=document.getElementById('srch');if(s)s.focus();}
 });
-applyF();
 <\/script></body></html>`;
   downloadHTML(html, `График_${y}-${pad(m+1)}.html`);
 }
@@ -2555,32 +2553,41 @@ function init() {
   el('modalClose')    && el('modalClose').addEventListener('click', closeModal);
   el('modalBackdrop') && el('modalBackdrop').addEventListener('click', ev => { if(ev.target===el('modalBackdrop')) closeModal(); });
 
-  // Timeline jump-to-employee search
-  el('tlEmpSearch') && el('tlEmpSearch').addEventListener('input', () => {
-    const q = (el('tlEmpSearch').value||'').trim().toLowerCase();
+  // Timeline: jump to employee on Enter or 🔍 button (not on every keystroke)
+  function doTlSearch() {
+    const q = (el('tlEmpSearch')?.value||'').trim().toLowerCase();
+    let found = false;
     qsa('.tl-row').forEach(row => {
-      const nameEl = row.querySelector('.tl-emp-name');
-      const name = (nameEl?.textContent||'').toLowerCase();
+      const name = (row.querySelector('.tl-emp-name')?.textContent||'').toLowerCase();
       const match = q && name.includes(q);
       row.classList.toggle('tl-emp-highlight', match);
-      if (match) {
-        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
+      if (match && !found) { row.scrollIntoView({ behavior:'smooth', block:'center' }); found = true; }
     });
+    if (q && !found) toast('Сотрудник не найден', 'warning');
+  }
+  el('tlEmpSearch')    && el('tlEmpSearch').addEventListener('keydown', e => { if (e.key==='Enter') doTlSearch(); });
+  el('tlEmpSearchBtn') && el('tlEmpSearchBtn').addEventListener('click', doTlSearch);
+  // Clear highlights when input is cleared
+  el('tlEmpSearch')    && el('tlEmpSearch').addEventListener('input', () => {
+    if (!(el('tlEmpSearch')?.value||'').trim()) qsa('.tl-row').forEach(r => r.classList.remove('tl-emp-highlight'));
   });
 
-  // Breaks jump-to-employee search
-  el('brkEmpSearch') && el('brkEmpSearch').addEventListener('input', () => {
-    const q = (el('brkEmpSearch').value||'').trim().toLowerCase();
+  // Breaks: jump to employee on Enter or 🔍 button
+  function doBrkSearch() {
+    const q = (el('brkEmpSearch')?.value||'').trim().toLowerCase();
+    let found = false;
     qsa('.brk-row').forEach(row => {
-      const nameEl = row.querySelector('.brk-emp-name');
-      const name = (nameEl?.textContent||'').toLowerCase();
+      const name = (row.querySelector('.brk-emp-name')?.textContent||'').toLowerCase();
       const match = q && name.includes(q);
       row.classList.toggle('brk-emp-highlight', match);
-      if (match) {
-        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
+      if (match && !found) { row.scrollIntoView({ behavior:'smooth', block:'center' }); found = true; }
     });
+    if (q && !found) toast('Сотрудник не найден', 'warning');
+  }
+  el('brkEmpSearch')    && el('brkEmpSearch').addEventListener('keydown', e => { if (e.key==='Enter') doBrkSearch(); });
+  el('brkEmpSearchBtn') && el('brkEmpSearchBtn').addEventListener('click', doBrkSearch);
+  el('brkEmpSearch')    && el('brkEmpSearch').addEventListener('input', () => {
+    if (!(el('brkEmpSearch')?.value||'').trim()) qsa('.brk-row').forEach(r => r.classList.remove('brk-emp-highlight'));
   });
 
   // Employee filters

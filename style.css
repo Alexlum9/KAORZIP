@@ -533,14 +533,19 @@ input, select, textarea { font: inherit; }
   position: sticky; left: 0;
   background: var(--surface-2); z-index: 20;
 }
-.tl-axis { display: flex; }
+.tl-axis { position: relative; height: 36px; }
 .tl-hour {
-  width: 120px; min-width: 120px;
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
   padding: 8px 0;
-  text-align: center;
   font-size: .71rem; color: var(--txt-muted);
-  border-left: 1px solid var(--border-color);
   font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  border-left: 1px solid var(--border-color);
+  padding-left: 3px;
+  transform: none;
 }
 .tl-hour-now { color: var(--primary); font-weight: 800; }
 
@@ -674,13 +679,26 @@ input, select, textarea { font: inherit; }
   top: 50%; transform: translateY(-50%);
   height: 30px; border-radius: 5px;
   cursor: pointer;
-  transition: all var(--t);
-  display: flex; align-items: center; justify-content: center;
-  padding: 0 6px;
-  overflow: visible;
+  transition: opacity var(--t), box-shadow var(--t);
+  overflow: hidden; /* keep colored shape clean, label lives above */
 }
-.brk-seg:hover { opacity: .88; transform: translateY(-50%) scaleY(1.08); box-shadow: 0 2px 6px rgba(0,0,0,.18); z-index: 4; }
-.brk-seg-lbl   { font-size: .72rem; font-weight: 700; color: #fff; white-space: nowrap; pointer-events: none; letter-spacing: .01em; }
+.brk-seg:hover { opacity: .88; box-shadow: 0 2px 6px rgba(0,0,0,.22); z-index: 4; }
+/* Label floats above the colored block so it's always fully visible */
+.brk-seg-lbl {
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 0;
+  font-size: .7rem; font-weight: 700;
+  color: var(--txt);
+  white-space: nowrap;
+  pointer-events: none;
+  background: var(--surface);
+  border-radius: 3px;
+  padding: 0 3px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.12);
+  z-index: 5;
+}
+.brk-track    { position: relative; height: 50px; flex: 1; overflow: visible; }
 .brk-seg-lbl-below {
   position: absolute; bottom: -12px; left: 50%; transform: translateX(-50%);
   font-size: .58rem; font-weight: 700; color: var(--txt-muted);
