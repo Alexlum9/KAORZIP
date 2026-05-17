@@ -421,15 +421,15 @@ function exportScheduleExcel() {
 
   const wb = XLSX.utils.book_new();
 
-  // Group schedule by month
+  // Group schedule by month — only months with at least one non-empty entry
   const monthMap = {};
   S.data.forEach(emp => {
     Object.entries(emp.schedule||{}).forEach(([dk, sc]) => {
+      if (!sc || sc.status === 'off') return;  // Skip "off" entries when deciding which months to emit
       const d = parseDate(dk);
       if (!d) return;
       const key = `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
-      if (!monthMap[key]) monthMap[key] = { year: d.getFullYear(), month: d.getMonth(), days: new Set() };
-      monthMap[key].days.add(d.getDate());
+      if (!monthMap[key]) monthMap[key] = { year: d.getFullYear(), month: d.getMonth() };
     });
   });
 
@@ -440,12 +440,10 @@ function exportScheduleExcel() {
     const daysInMonth = new Date(year, month+1, 0).getDate();
     const sheetName = `${MONTH_NAMES_RU[month]}_${String(year).slice(2)}`;
 
-    // Build header row
+    // Build header row — use UTC for clean integer Excel serials
     const hdrRow = ['ФИО','РГ','Линия/позиция','СВ','Дата приема','График сурв','Смена'];
     for (let d = 1; d <= daysInMonth; d++) {
-      const dt = new Date(year, month, d);
-      // Store as Excel serial date
-      const serial = (dt.getTime() / 864e5) + 25569;
+      const serial = Math.round(Date.UTC(year, month, d) / 864e5) + 25569;
       hdrRow.push(serial, '', '', '', '');
     }
 
@@ -464,13 +462,33 @@ function exportScheduleExcel() {
 
     const ws = XLSX.utils.aoa_to_sheet(dataRows);
 
-    // Format date cells in header
-    const dateStyle = { numFmt: 'DD.MM.YYYY' };
+    // Apply Excel date format to all day-header cells in row 1
     for (let d = 0; d < daysInMonth; d++) {
-      const colIdx = 7 + d*5;
+      const colIdx = 7 + d * 5;
       const cellAddr = XLSX.utils.encode_cell({ r: 0, c: colIdx });
-      if (ws[cellAddr]) ws[cellAddr].t = 'n';
+      if (ws[cellAddr]) {
+        ws[cellAddr].t = 'n';
+        ws[cellAddr].z = 'dd.mm.yyyy';
+      }
     }
+
+    // Column widths — mirror the original file
+    const cols = [
+      { wch: 22 },  // A ФИО
+      { wch: 14 },  // B РГ
+      { wch: 16 },  // C Линия/позиция
+      { wch: 14 },  // D СВ
+      { wch: 12 },  // E Дата приема
+      { wch:  9 },  // F График сурв
+      { wch:  6 },  // G Смена
+    ];
+    for (let d = 0; d < daysInMonth; d++) cols.push({ wch: 3 }, { wch: 3 }, { wch: 3 }, { wch: 3 }, { wch: 3 });
+    ws['!cols'] = cols;
+
+    // Row heights: header tall, data rows compact
+    const rows = [{ hpt: 36 }];
+    for (let r = 1; r <= S.data.length; r++) rows.push({ hpt: 14 });
+    ws['!rows'] = rows;
 
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
   });
@@ -488,6 +506,7 @@ function exportScheduleExcel() {
     [9,'Изменение смены (перенос, подмена)',''],
     [21,'Ночная смена',''],
   ]);
+  oznWs['!cols'] = [{ wch: 16 }, { wch: 36 }, { wch: 28 }];
   XLSX.utils.book_append_sheet(wb, oznWs, 'обозначения');
 
   XLSX.writeFile(wb, `KAORZIP_Расписание_${dateKey(new Date())}.xlsx`);
@@ -542,6 +561,13 @@ function exportBreaksExcel() {
     });
 
     const ws = XLSX.utils.aoa_to_sheet([hdr, countRow, ...empRows]);
+    // Column widths to match original
+    ws['!cols'] = [
+      { wch: 28 },  // ФИО
+      { wch: 14 },  // Смена
+      { wch: 16 },  // СВ
+      ...slots.map(() => ({ wch: 6 })),
+    ];
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
   });
 
@@ -696,6 +722,7 @@ const PAGE_LABELS = {
 };
 
 function navigate(page, params={}) {
+  const prevPage = S.page;
   qsa('.page').forEach(p => p.classList.add('hidden'));
   const target = el(`page-${page}`);
   if (!target) return;
@@ -712,6 +739,13 @@ function navigate(page, params={}) {
     import:renderImport, export:renderExport };
   if (renders[page]) renders[page]();
   else if (page==='employee') renderProfile(params.id || S.currentEmpId);
+
+  // Scroll the new page to top — don't carry over the previous page's scroll depth
+  if (prevPage !== page) {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    const ca = document.querySelector('.content-area');
+    if (ca) ca.scrollTop = 0;
+  }
 
   _internalNav = true;
   window.location.hash = page;
@@ -1249,10 +1283,10 @@ function renderBreaksPage() {
       const bw = tDurPx(br.start, br.end);
       const bc = BREAK_COLORS[br.type]||'#f59e0b';
       const safe = b.name.replace(/'/g,"\\'");
-      // Always show time inside the block. Wide blocks get full range, narrow just start.
-      // overflow:visible on the block means the label won't be clipped.
-      const lbl = bw > 92 ? `${br.start}–${br.end}` : br.start;
-      return `<div class="brk-seg" style="left:${bx}px;width:${Math.max(bw,8)}px;background:${bc};" title="${br.type}: ${br.start}–${br.end} · кликни для редактирования" onclick="showBreakEdit('${safe}','${br.start}','${br.end}','${br.type}')"><span class="brk-seg-lbl">${lbl}</span></div>`;
+      // Always show time inside the block; widen to fit text comfortably.
+      const lbl = bw > 110 ? `${br.start}–${br.end}` : br.start;
+      const minW = bw > 110 ? 110 : 44;  // 44px fits "HH:MM" with padding
+      return `<div class="brk-seg" style="left:${bx}px;width:${Math.max(bw,minW)}px;background:${bc};" title="${br.type}: ${br.start}–${br.end} · кликни для редактирования" onclick="showBreakEdit('${safe}','${br.start}','${br.end}','${br.type}')"><span class="brk-seg-lbl">${lbl}</span></div>`;
     }).join('');
 
     const safeNav = (emp?.name||b.name).replace(/'/g,"\\'");
@@ -1964,7 +1998,7 @@ function exportBreaksHTML() {
   }
   if (!rows.length) { toast('Нет данных для экспорта', 'warning'); return; }
 
-  const TW = 700, TS = 8*60, TE = 22*60;
+  const TW = 980, TS = 8*60, TE = 22*60;
   const tX = t => { const [h,m]=(t||'0:0').split(':').map(Number); return Math.max(0,((h*60+m)-TS)/(TE-TS)*TW); };
   const dX = (s,e_) => { const [sh,sm]=s.split(':').map(Number); let [eh,em]=e_.split(':').map(Number); let sd=sh*60+sm,ed=eh*60+em; if(ed<sd)ed+=1440; return Math.max((ed-sd)/(TE-TS)*TW,4); };
 
@@ -1984,37 +2018,42 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 header{background:#1e293b;color:#f1f5f9;padding:14px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
 .logo{font-weight:800;font-size:1rem;letter-spacing:.04em;}
 h1{font-size:.95rem;font-weight:700;flex:1;}
-.dt{font-size:.8rem;color:#94a3b8;}
+.dt{font-size:.85rem;color:#cbd5e1;font-weight:600;}
 .bar{padding:10px 22px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;gap:8px;flex-wrap:wrap;align-items:center;position:sticky;top:0;z-index:10;}
 .bar input,.bar select{padding:5px 12px;border:1px solid #e2e8f0;border-radius:20px;font-size:.83rem;outline:none;background:#f8fafc;color:#0f172a;}
 .bar input:focus,.bar select:focus{border-color:#2563eb;}
 .rst{padding:4px 10px;border:1px solid #e2e8f0;border-radius:20px;font-size:.78rem;cursor:pointer;background:none;color:#64748b;}
 .rst:hover{border-color:#2563eb;color:#2563eb;}
 .cnt{font-size:.78rem;color:#64748b;margin-left:auto;}
-.leg{display:flex;gap:10px;flex-wrap:wrap;padding:8px 22px;font-size:.76rem;color:#64748b;}
-.ld{width:10px;height:10px;border-radius:2px;display:inline-block;vertical-align:middle;margin-right:3px;}
+.leg{display:flex;gap:14px;flex-wrap:wrap;padding:8px 22px;font-size:.78rem;color:#475569;}
+.ld{width:12px;height:12px;border-radius:3px;display:inline-block;vertical-align:middle;margin-right:5px;}
 main{padding:14px 22px;}
 .card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:10px;overflow:hidden;}
-.hdr{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid #f0f4f8;}
-.ava{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.76rem;flex-shrink:0;}
-.nm{font-weight:700;font-size:.88rem;}
-.mt{font-size:.74rem;color:#64748b;}
-.sh{margin-left:auto;font-size:.78rem;color:#64748b;white-space:nowrap;}
+.hdr{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #f0f4f8;}
+.ava{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.78rem;flex-shrink:0;}
+.nm{font-weight:700;font-size:.92rem;}
+.mt{font-size:.75rem;color:#64748b;}
+.sh{margin-left:auto;font-size:.82rem;color:#475569;font-weight:600;white-space:nowrap;}
 .tw{padding:10px 14px 14px;overflow-x:auto;}
-.ax{display:flex;width:${TW}px;margin-bottom:5px;}
-.ax span{flex:1;font-size:.6rem;color:#94a3b8;}
-.tr{position:relative;height:26px;width:${TW}px;}
-.sb{position:absolute;top:50%;transform:translateY(-50%);height:5px;border-radius:3px;}
-.bs{position:absolute;top:50%;transform:translateY(-50%);height:20px;border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:visible;}
-.bl{font-size:.6rem;font-weight:700;color:#fff;white-space:nowrap;padding:0 3px;}
+.tw::-webkit-scrollbar{height:12px;}
+.tw::-webkit-scrollbar-track{background:#f1f5f9;border-radius:6px;}
+.tw::-webkit-scrollbar-thumb{background:#94a3b8;border-radius:6px;border:2px solid #f1f5f9;}
+.tw::-webkit-scrollbar-thumb:hover{background:#64748b;}
+.ax{display:flex;width:${TW}px;margin-bottom:6px;}
+.ax span{flex:1;font-size:.68rem;color:#94a3b8;font-weight:500;}
+.tr{position:relative;height:36px;width:${TW}px;}
+.sb{position:absolute;top:50%;transform:translateY(-50%);height:6px;border-radius:3px;}
+.bs{position:absolute;top:50%;transform:translateY(-50%);height:28px;border-radius:5px;display:flex;align-items:center;justify-content:center;padding:0 6px;overflow:visible;}
+.bl{font-size:.74rem;font-weight:700;color:#fff;white-space:nowrap;letter-spacing:.01em;}
 .empty{text-align:center;padding:50px;color:#94a3b8;}
-@media print{.bar,header{position:static!important;}}`;
+.hint{text-align:center;padding:6px;font-size:.72rem;color:#94a3b8;font-style:italic;}
+@media print{.bar,header{position:static!important;}.tw::-webkit-scrollbar{display:none;}}`;
 
   const html = `<!DOCTYPE html>
 <html lang="ru"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>График перерывов — ${dateStr}</title><style>${css}</style></head>
 <body>
-<header><span class="logo">KAORZIP</span><h1>График перерывов</h1><span class="dt">${dateStr}</span></header>
+<header><span class="logo">KAORZIP</span><h1>График перерывов — ${dateStr}</h1><span class="dt">📅 ${dateStr}</span></header>
 <div class="bar">
   <input type="text" id="srch" placeholder="Найти сотрудника… (или нажми /)" oninput="applyF()"/>
   ${svs.length?`<select id="svF" onchange="applyF()"><option value="">Все СВ</option>${svOpts}</select>`:''}
@@ -2049,8 +2088,10 @@ function build(rows){
     const sb=sw?'<div class="sb" style="background:'+col+'30;left:'+sx+'px;width:'+sw+'px;"></div>':'';
     const segs=(r.breaks||[]).map(b=>{
       const bx=tX(b.start),bw=dX(b.start,b.end),bc=BC[b.type]||'#f59e0b';
-      const lbl=bw>30?(bw>80?b.start+'–'+b.end:b.start):'';
-      return '<div class="bs" style="left:'+bx+'px;width:'+Math.max(bw,6)+'px;background:'+bc+';" title="'+b.type+': '+b.start+'–'+b.end+'"><span class="bl">'+lbl+'</span></div>';
+      // Always show time inside the block; widen so text fits.
+      const lbl=bw>110?(b.start+'–'+b.end):b.start;
+      const minW=bw>110?110:48;
+      return '<div class="bs" style="left:'+bx+'px;width:'+Math.max(bw,minW)+'px;background:'+bc+';" title="'+b.type+': '+b.start+'–'+b.end+'"><span class="bl">'+lbl+'</span></div>';
     }).join('');
     return '<div class="card" data-n="'+r.name.toLowerCase()+'" data-sv="'+(r.sv||'')+'" data-rg="'+(r.rg||'')+'">'+
       '<div class="hdr"><div class="ava" style="background:'+col+'22;color:'+col+';">'+ini(r.name)+'</div>'+
@@ -2099,32 +2140,50 @@ function exportScheduleHTML() {
 
   const rgs = [...new Set(empData.map(e=>e.rg).filter(Boolean))].sort();
   const svs = [...new Set(empData.map(e=>e.sv).filter(Boolean))].sort();
-  const daysHdr = days.map(d=>`<th style="min-width:38px;padding:3px;text-align:center;font-size:.6rem;border-left:1px solid #e2e8f0;${d.dk===dk?'background:#dbeafe;':''}">${d.d}<br><span style="font-weight:400;opacity:.7;">${d.dow}</span></th>`).join('');
+  const daysHdr = days.map(d=>`<th class="th-day${d.dk===dk?' th-today':''}">${d.d}<br><span class="dow">${d.dow}</span></th>`).join('');
 
   const dataJSON = JSON.stringify(empData);
 
+  // Three left columns are sticky. left offsets must match their widths.
   const css = `*{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0f4f8;color:#0f172a;font-size:13px;}
-header{background:#1e293b;color:#f1f5f9;padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+html,body{height:100%;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0f4f8;color:#0f172a;font-size:13px;display:flex;flex-direction:column;}
+header{background:#1e293b;color:#f1f5f9;padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;flex-shrink:0;}
 .logo{font-weight:800;font-size:.95rem;letter-spacing:.04em;}
 h1{font-size:.9rem;font-weight:700;flex:1;}
-.dt{font-size:.78rem;color:#94a3b8;}
-.bar{padding:9px 20px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:10;}
+.dt{font-size:.82rem;color:#cbd5e1;font-weight:600;}
+.bar{padding:9px 20px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex-shrink:0;}
 .bar input,.bar select{padding:4px 10px;border:1px solid #e2e8f0;border-radius:20px;font-size:.8rem;outline:none;background:#f8fafc;color:#0f172a;}
 .bar input:focus,.bar select:focus{border-color:#2563eb;}
 .rst{padding:3px 9px;border:1px solid #e2e8f0;border-radius:20px;font-size:.76rem;cursor:pointer;background:none;color:#64748b;}
 .rst:hover{border-color:#2563eb;color:#2563eb;}
 .cnt{font-size:.76rem;color:#64748b;margin-left:auto;}
-.tw{overflow-x:auto;padding:14px 20px;}
-table{border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08);}
-thead{position:sticky;top:46px;z-index:5;}
-th{padding:7px 8px;text-align:left;font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;background:#f8fafc;border-bottom:2px solid #e2e8f0;white-space:nowrap;}
-td{padding:6px 8px;border-bottom:1px solid #f0f4f8;font-size:.8rem;vertical-align:middle;}
+.tw{flex:1;overflow:auto;padding:14px 20px 20px;}
+.tw::-webkit-scrollbar{height:14px;width:14px;}
+.tw::-webkit-scrollbar-track{background:#e2e8f0;border-radius:7px;}
+.tw::-webkit-scrollbar-thumb{background:#94a3b8;border-radius:7px;border:2px solid #e2e8f0;}
+.tw::-webkit-scrollbar-thumb:hover{background:#475569;}
+.tw::-webkit-scrollbar-corner{background:#e2e8f0;}
+table{border-collapse:separate;border-spacing:0;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);}
+thead th{position:sticky;top:0;background:#f8fafc;z-index:3;padding:8px;text-align:left;font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid #e2e8f0;white-space:nowrap;}
+th.th-day{padding:6px 3px;text-align:center;font-size:.65rem;min-width:42px;border-left:1px solid #e2e8f0;}
+th.th-day .dow{font-weight:400;opacity:.7;font-size:.6rem;}
+th.th-today{background:#dbeafe;color:#1e40af;}
+td{padding:7px 8px;border-bottom:1px solid #f0f4f8;font-size:.8rem;vertical-align:middle;background:#fff;}
 tr:last-child td{border-bottom:none;}
 tr:hover td{background:#f8fafc;}
-.ch{display:inline-flex;align-items:center;justify-content:center;padding:1px 4px;border-radius:10px;font-size:.59rem;font-weight:700;white-space:nowrap;line-height:1.3;}
-.td-today{background:#dbeafe1a;}
-@media print{.bar,header{position:static!important;}.tw{padding:0;}table{box-shadow:none;}}`;
+/* Sticky left columns */
+.col-name,.col-rg,.col-sv{position:sticky;background:#fff;z-index:1;}
+thead .col-name,thead .col-rg,thead .col-sv{z-index:4;background:#f8fafc;}
+.col-name{left:0;min-width:200px;max-width:200px;}
+.col-rg{left:200px;min-width:90px;max-width:90px;}
+.col-sv{left:290px;min-width:130px;max-width:130px;border-right:2px solid #cbd5e1;}
+tr:hover .col-name,tr:hover .col-rg,tr:hover .col-sv{background:#f8fafc;}
+.ch{display:inline-flex;align-items:center;justify-content:center;padding:2px 6px;border-radius:10px;font-size:.65rem;font-weight:700;white-space:nowrap;line-height:1.3;}
+.td-today{background:#eff6ff;}
+.scroll-hint{padding:8px 20px;background:linear-gradient(90deg,#dbeafe,#fff);font-size:.78rem;color:#1e40af;text-align:center;flex-shrink:0;border-bottom:1px solid #e2e8f0;}
+.scroll-hint b{font-weight:700;}
+@media print{.bar,header,.scroll-hint{position:static!important;}.tw{padding:0;overflow:visible;}table{box-shadow:none;}thead th{position:static;}.col-name,.col-rg,.col-sv{position:static;}}`;
 
   const html = `<!DOCTYPE html>
 <html lang="ru"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
@@ -2138,11 +2197,12 @@ tr:hover td{background:#f8fafc;}
   <button class="rst" onclick="resetF()">✕ Сбросить</button>
   <span class="cnt" id="cnt"></span>
 </div>
+<div class="scroll-hint">← <b>Прокрути таблицу вправо</b>, чтобы увидеть остальные дни месяца. ФИО, РГ и СВ остаются на месте. →</div>
 <div class="tw"><table id="tbl">
   <thead><tr>
-    <th style="min-width:180px;">ФИО</th>
-    <th style="min-width:70px;">РГ</th>
-    <th style="min-width:90px;">СВ</th>
+    <th class="col-name">ФИО</th>
+    <th class="col-rg">РГ</th>
+    <th class="col-sv">СВ</th>
     ${daysHdr}
   </tr></thead>
   <tbody id="tbody"></tbody>
@@ -2162,7 +2222,7 @@ function build(rows){
       const tip=lbl&&d.s?d.s+'–'+d.e:'';
       return '<td class="'+(i===tidx?'td-today':'')+'" title="'+tip+'">'+(lbl?'<span class="ch" style="background:'+col+'22;color:'+col+';">'+lbl+'</span>':'')+'</td>';
     }).join('');
-    return '<tr><td><b>'+e.name+'</b></td><td>'+e.rg+'</td><td>'+e.sv+'</td>'+cells+'</tr>';
+    return '<tr><td class="col-name"><b>'+e.name+'</b></td><td class="col-rg">'+e.rg+'</td><td class="col-sv">'+e.sv+'</td>'+cells+'</tr>';
   }).join('');
 }
 function applyF(){
