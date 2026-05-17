@@ -2011,10 +2011,10 @@ function exportBreaksHTML() {
   const svOpts = svs.map(s=>`<option>${esc(s)}</option>`).join('');
   const rgOpts = rgs.map(s=>`<option>${esc(s)}</option>`).join('');
 
-  // Pre-render axis with absolute-positioned labels (pixel-exact alignment)
+  // Pre-render axis with vertical guide lines + labels centered on tick positions
   const axisHTML = hours.map(h => {
     const left = ((h*60 - TS) / (TE - TS) * TW).toFixed(1);
-    return `<span style="position:absolute;left:${left}px;font-size:.66rem;color:#94a3b8;font-weight:500;white-space:nowrap;">${h<10?'0'+h:h}:00</span>`;
+    return `<div style="position:absolute;left:${left}px;top:0;bottom:0;width:1px;background:#e2e8f0;"></div><span style="position:absolute;left:${left}px;top:0;transform:translateX(-50%);font-size:.66rem;color:#94a3b8;font-weight:500;white-space:nowrap;background:#fff;padding:0 2px;">${h<10?'0'+h:h}:00</span>`;
   }).join('');
 
   // Pre-render all cards as static HTML — no JS needed to display content
@@ -2027,15 +2027,20 @@ function exportBreaksHTML() {
     const segs = (r.breaks || []).map(b => {
       const bx = tX(b.start), bw = dX(b.start, b.end);
       const bc = BCOLORS[b.type] || '#f59e0b';
-      const lbl = bw > 110 ? `${b.start}–${b.end}` : b.start;
-      return `<div style="position:absolute;top:50%;transform:translateY(-50%);height:28px;border-radius:5px;overflow:hidden;background:${bc};left:${bx.toFixed(1)}px;width:${Math.max(bw,6).toFixed(1)}px;" title="${esc(b.type)}: ${b.start}–${b.end}"><span style="position:absolute;bottom:calc(100% + 3px);left:0;font-size:.7rem;font-weight:700;color:#0f172a;white-space:nowrap;background:rgba(255,255,255,.92);border-radius:3px;padding:0 3px;pointer-events:none;">${lbl}</span></div>`;
+      // Wide enough to show "10:00" inside without overflow; centered on actual midpoint when widened
+      const minW = 58;
+      const useNatural = bw >= minW;
+      const finalW = useNatural ? bw : minW;
+      const finalLeft = useNatural ? bx : (bx + bw/2 - finalW/2);
+      const lbl = bw > 95 ? `${b.start}–${b.end}` : b.start;
+      return `<div style="position:absolute;top:50%;transform:translateY(-50%);height:28px;border-radius:5px;background:${bc};overflow:hidden;left:${finalLeft.toFixed(1)}px;width:${finalW.toFixed(1)}px;display:flex;align-items:center;justify-content:center;padding:0 4px;box-shadow:0 1px 2px rgba(0,0,0,.15);" title="${esc(b.type)}: ${b.start}–${b.end}"><span style="font-size:.7rem;font-weight:700;color:#fff;white-space:nowrap;letter-spacing:.01em;">${lbl}</span></div>`;
     }).join('');
     return `<div class="card" data-n="${esc(r.name.toLowerCase())}" data-sv="${esc(r.sv||'')}" data-rg="${esc(r.rg||'')}">
 <div class="hdr"><div class="ava" style="background:${col}22;color:${col};">${ini(r.name)}</div>
 <div><div class="nm">${esc(r.name)}</div><div class="mt">СВ: ${esc(r.sv||'—')}${r.rg?' · '+esc(r.rg):''}</div></div>
 <span class="sh">${esc(r.shift)}</span></div>
-<div class="tw"><div style="position:relative;height:20px;width:${TW}px;margin-bottom:8px;">${axisHTML}</div>
-<div style="position:relative;height:50px;width:${TW}px;overflow:visible;">${sb}${segs}</div></div></div>`;
+<div class="tw"><div style="position:relative;height:18px;width:${TW}px;margin-bottom:6px;">${axisHTML}</div>
+<div style="position:relative;height:40px;width:${TW}px;">${sb}${segs}</div></div></div>`;
   }).join('\n');
 
   const css = `*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
@@ -2081,10 +2086,10 @@ main{padding:14px 22px;}
 <body>
 <header><span class="logo">KAORZIP</span><h1>График перерывов — ${dateStr}</h1><span class="dt">📅 ${dateStr}</span></header>
 <div class="bar">
-  <input type="text" id="srch" placeholder="Найти сотрудника…" oninput="applyF()"/>
-  ${svs.length?`<select id="svF" onchange="applyF()"><option value="">Все СВ</option>${svOpts}</select>`:''}
-  ${rgs.length?`<select id="rgF" onchange="applyF()"><option value="">Все РГ</option>${rgOpts}</select>`:''}
-  <button class="rst" onclick="resetF()">✕ Сбросить</button>
+  <input type="text" id="srch" placeholder="Найти сотрудника…"/>
+  ${svs.length?`<select id="svF"><option value="">Все СВ</option>${svOpts}</select>`:''}
+  ${rgs.length?`<select id="rgF"><option value="">Все РГ</option>${rgOpts}</select>`:''}
+  <button class="rst" id="rstBtn">✕ Сбросить</button>
   <span class="cnt" id="cnt">${rows.length} сотрудников</span>
 </div>
 <div class="leg">
@@ -2097,28 +2102,44 @@ ${cardsHTML}
 <div class="empty" id="emptyMsg">Ничего не найдено</div>
 </main>
 <script>
-function applyF(){
-  var q=(document.getElementById('srch')||{value:''}).value.toLowerCase();
-  var sv=(document.getElementById('svF')||{value:''}).value;
-  var rg=(document.getElementById('rgF')||{value:''}).value;
-  var shown=0;
-  document.querySelectorAll('.card').forEach(function(c){
-    var ok=(!q||c.dataset.n.includes(q))&&(!sv||c.dataset.sv===sv)&&(!rg||c.dataset.rg===rg);
-    c.style.display=ok?'':'none';
-    if(ok)shown++;
+(function(){
+  function applyF(){
+    var sEl=document.getElementById('srch'), svEl=document.getElementById('svF'), rgEl=document.getElementById('rgF');
+    var q=(sEl?sEl.value:'').toLowerCase();
+    var sv=svEl?svEl.value:'';
+    var rg=rgEl?rgEl.value:'';
+    var cards=document.querySelectorAll('.card');
+    var shown=0;
+    for(var i=0;i<cards.length;i++){
+      var c=cards[i];
+      var ok=(!q||(c.getAttribute('data-n')||'').indexOf(q)>=0)&&(!sv||c.getAttribute('data-sv')===sv)&&(!rg||c.getAttribute('data-rg')===rg);
+      c.style.display=ok?'':'none';
+      if(ok)shown++;
+    }
+    var cnt=document.getElementById('cnt');
+    if(cnt)cnt.textContent=shown+' сотрудников';
+    var em=document.getElementById('emptyMsg');
+    if(em)em.style.display=shown?'none':'block';
+  }
+  function resetF(){
+    ['srch','svF','rgF'].forEach(function(id){var e=document.getElementById(id);if(e)e.value='';});
+    applyF();
+  }
+  function bind(id, evt){
+    var e=document.getElementById(id);
+    if(!e)return;
+    e.addEventListener(evt, applyF);
+    e.addEventListener('keyup', applyF);
+  }
+  bind('srch','input');
+  bind('svF','change');
+  bind('rgF','change');
+  var rb=document.getElementById('rstBtn');
+  if(rb)rb.addEventListener('click', resetF);
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape')resetF();
   });
-  document.getElementById('cnt').textContent=shown+' сотрудников';
-  var em=document.getElementById('emptyMsg');
-  if(em)em.style.display=shown?'none':'block';
-}
-function resetF(){
-  ['srch','svF','rgF'].forEach(function(id){var e=document.getElementById(id);if(e)e.value='';});
-  applyF();
-}
-document.addEventListener('keydown',function(e){
-  if(e.key==='Escape')resetF();
-  if(e.key==='/'&&e.target.tagName!=='INPUT'){e.preventDefault();var s=document.getElementById('srch');if(s)s.focus();}
-});
+})();
 <\/script></body></html>`;
   downloadHTML(html, `Перерывы_${dk}.html`);
 }
@@ -2180,7 +2201,7 @@ h1{font-size:.9rem;font-weight:700;flex:1;}
 .tw::-webkit-scrollbar-thumb:hover{background:#475569;}
 .tw::-webkit-scrollbar-corner{background:#e2e8f0;}
 table{border-collapse:separate;border-spacing:0;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);}
-thead th{position:sticky;top:0;background:#f8fafc;z-index:3;padding:8px;text-align:left;font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid #e2e8f0;white-space:nowrap;}
+thead th{position:sticky;top:0;background:#f8fafc;z-index:3;padding:8px;text-align:left;font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;border-bottom:none;box-shadow:0 2px 0 0 #cbd5e1,inset 0 -1px 0 0 #f8fafc;}
 th.th-day{padding:6px 3px;text-align:center;font-size:.65rem;min-width:42px;border-left:1px solid #e2e8f0;}
 th.th-day .dow{font-weight:400;opacity:.7;font-size:.6rem;}
 th.th-today{background:#dbeafe;color:#1e40af;}
@@ -2205,9 +2226,12 @@ tr:hover .col-name,tr:hover .col-rg,tr:hover .col-sv{background:#f8fafc;}
   .scroll-hint{padding:5px 14px;font-size:.72rem;}
   .tw{padding:8px 14px 10px;}
   th,td{padding:5px 4px;font-size:.72rem;}
-  .col-name{min-width:140px;max-width:140px;}
-  .col-rg{left:140px;min-width:60px;max-width:60px;}
-  .col-sv{left:200px;min-width:80px;max-width:80px;}
+  /* Mobile: only ФИО sticky horizontally; РГ/СВ scroll normally */
+  .col-name{min-width:120px;max-width:120px;}
+  .col-rg,.col-sv{position:static!important;left:auto!important;min-width:auto;max-width:none;background:#fff;}
+  thead .col-rg,thead .col-sv{position:sticky!important;top:0;background:#f8fafc;z-index:3;}
+  .col-sv{border-right:none;}
+  .col-name{border-right:2px solid #cbd5e1;}
 }
 @media print{.bar,header,.scroll-hint{position:static!important;}.tw{padding:0;overflow:visible;}table{box-shadow:none;}thead th{position:static;}.col-name,.col-rg,.col-sv{position:static;}}`;
 
@@ -2217,13 +2241,13 @@ tr:hover .col-name,tr:hover .col-rg,tr:hover .col-sv{background:#f8fafc;}
 <body>
 <header><span class="logo">KAORZIP</span><h1>График работы — ${MONTHS_NOM[m]} ${y}</h1><span class="dt">Экспорт: ${dateStr}</span></header>
 <div class="bar">
-  <input type="text" id="srch" placeholder="Найти сотрудника…" oninput="applyF()"/>
-  ${rgs.length?`<select id="rgF" onchange="applyF()"><option value="">Все РГ</option>${rgs.map(r=>`<option>${esc(r)}</option>`).join('')}</select>`:''}
-  ${svs.length?`<select id="svF" onchange="applyF()"><option value="">Все СВ</option>${svs.map(s=>`<option>${esc(s)}</option>`).join('')}</select>`:''}
-  <button class="rst" onclick="resetF()">✕ Сбросить</button>
+  <input type="text" id="srch" placeholder="Найти сотрудника…"/>
+  ${rgs.length?`<select id="rgF"><option value="">Все РГ</option>${rgs.map(r=>`<option>${esc(r)}</option>`).join('')}</select>`:''}
+  ${svs.length?`<select id="svF"><option value="">Все СВ</option>${svs.map(s=>`<option>${esc(s)}</option>`).join('')}</select>`:''}
+  <button class="rst" id="rstBtn">✕ Сбросить</button>
   <span class="cnt" id="cnt">${empData.length} сотрудников</span>
 </div>
-<div class="scroll-hint">← <b>Прокрути таблицу вправо</b>, чтобы увидеть остальные дни месяца. ФИО, РГ и СВ остаются на месте. →</div>
+<div class="scroll-hint">← <b>Прокрути таблицу вправо</b>, чтобы увидеть остальные дни месяца.</div>
 <div class="tw"><table>
   <thead><tr>
     <th class="col-name">ФИО</th>
@@ -2236,23 +2260,42 @@ ${tbodyHTML}
   </tbody>
 </table></div>
 <script>
-function applyF(){
-  var q=(document.getElementById('srch')||{value:''}).value.toLowerCase();
-  var rg=(document.getElementById('rgF')||{value:''}).value;
-  var sv=(document.getElementById('svF')||{value:''}).value;
-  var shown=0;
-  document.querySelectorAll('#tbody tr').forEach(function(r){
-    var ok=(!q||r.dataset.n.includes(q))&&(!rg||r.dataset.rg===rg)&&(!sv||r.dataset.sv===sv);
-    r.style.display=ok?'':'none';
-    if(ok)shown++;
+(function(){
+  function applyF(){
+    var sEl=document.getElementById('srch'), rgEl=document.getElementById('rgF'), svEl=document.getElementById('svF');
+    var q=(sEl?sEl.value:'').toLowerCase();
+    var rg=rgEl?rgEl.value:'';
+    var sv=svEl?svEl.value:'';
+    var rows=document.querySelectorAll('#tbody tr');
+    var shown=0;
+    for(var i=0;i<rows.length;i++){
+      var r=rows[i];
+      var ok=(!q||(r.getAttribute('data-n')||'').indexOf(q)>=0)&&(!rg||r.getAttribute('data-rg')===rg)&&(!sv||r.getAttribute('data-sv')===sv);
+      r.style.display=ok?'':'none';
+      if(ok)shown++;
+    }
+    var cnt=document.getElementById('cnt');
+    if(cnt)cnt.textContent=shown+' сотрудников';
+  }
+  function resetF(){
+    ['srch','rgF','svF'].forEach(function(id){var e=document.getElementById(id);if(e)e.value='';});
+    applyF();
+  }
+  function bind(id, evt){
+    var e=document.getElementById(id);
+    if(!e)return;
+    e.addEventListener(evt, applyF);
+    e.addEventListener('keyup', applyF);
+  }
+  bind('srch','input');
+  bind('rgF','change');
+  bind('svF','change');
+  var rb=document.getElementById('rstBtn');
+  if(rb)rb.addEventListener('click', resetF);
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape')resetF();
   });
-  document.getElementById('cnt').textContent=shown+' сотрудников';
-}
-function resetF(){['srch','rgF','svF'].forEach(function(id){var e=document.getElementById(id);if(e)e.value='';});applyF();}
-document.addEventListener('keydown',function(e){
-  if(e.key==='Escape')resetF();
-  if(e.key==='/'&&e.target.tagName!=='INPUT'){e.preventDefault();var s=document.getElementById('srch');if(s)s.focus();}
-});
+})();
 <\/script></body></html>`;
   downloadHTML(html, `График_${y}-${pad(m+1)}.html`);
 }
